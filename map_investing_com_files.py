@@ -12,4 +12,5 @@ for filename in os.listdir(dir):
         df["Date"] = pd.to_datetime(df["Date"], infer_datetime_format=True)
         df = df.rename(columns={"Price":"Close"})
         ticker = filename.split(" ")[0]
+        df = df.reindex(index=df.index[::-1])
         df.to_csv(dir + "\\" + ticker + ".csv", index=False)
