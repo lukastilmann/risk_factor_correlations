@@ -33,11 +33,21 @@ def is_item_1b_header(text):
 def is_item_2_header(text):
     if len(text) < 150 and "2" in text:
         text = text.replace("&nbsp", " ").strip().lower()
-        if (len(text) < 70 and "item" in text and "2" in text) and (
+        if (len(text) < 85 and "item" in text and "2" in text) and (
                 len(text) < 15 or (any(word in text for word in ["unregistered", "equity", "securities", "proceeds"]))):
             return True
 
     return False
+
+def is_item_6_header(text):
+    if len(text) < 150 and "6" in text:
+        text = text.replace("&nbsp", " ").strip().lower()
+        if (len(text) < 50 and "item" in text and "6" in text) and (
+                len(text) < 15 or ("exhibits" in text)):
+            return True
+
+    return False
+
 
 def print_filing(tuple):
   print(str(not tuple[3]) + " " + tuple[0] + " - " + tuple[1] + " -" + tuple[2][:250])
@@ -53,17 +63,17 @@ def parse_filing(company, doc_lxml, doc):
 
     for text in text_elem:
         if fromhere:
-            if is_item_1b_header(text) or is_item_2_header(text):
+            if is_item_1b_header(text) or is_item_2_header(text) or is_item_6_header(text):
                 fromhere = False
                 if len(risk_factors_text) > 10:
-                    print("got item 2 or 1b and has text!")
+                    #print("got item 2 or 1b and has text!")
                     break
-                else:
-                    print("got next item but no text!")
+                #else:
+                #    print("got next item but no text!")
             text = text.strip()
             if len(text) > 4 and not (
                     any(word in text.lower() for word in ["index", "contents", "item", "factor", "summary"]) and len(
-                    text) < 75):
+                    text) < 40):
                 if text[0] in ",;:":
                     current_text = current_text + text
                 else:
@@ -73,13 +83,13 @@ def parse_filing(company, doc_lxml, doc):
                     current_text = ""
         if is_item_1a_header(text):
             fromhere = True
-            print("item 1a start")
+            #print("item 1a start")
 
     text_content = "\n".join(risk_factors_text)
 
-    print(fromhere)
-    print(len(text_content))
-    print("--------------------------")
+    #print(fromhere)
+    #print(len(text_content))
+    #print("--------------------------")
 
     return (company.name, doc.content["Period of Report"], text_content, fromhere)
 
@@ -153,7 +163,7 @@ def pull_reports(cik, ticker, c_id, start):
 
     df_10q = pd.DataFrame({"date": dates, "content": content, "fromhere": fromhere, "has_content": has_content})
 
-    print(df_10q["fromhere"])
+    print(df_10q["content"][:250] + " ---- " + df_10q["content"][-250:])
 
 
 
