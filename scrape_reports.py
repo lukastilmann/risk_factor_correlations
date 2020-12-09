@@ -1,5 +1,7 @@
 from edgar import Edgar, Company
 import pandas as pd
+import os
+import pickle
 
 companies = "data/companies.csv"
 edgar = Edgar()
@@ -153,7 +155,7 @@ def get_filings_by_company(company, type, n):
 
     return (docs_lxml, docs_data)
 
-def pull_reports(cik, ticker, c_id, start):
+def pull_company_reports(cik, ticker, c_id, start):
 
     company = get_company_by_cik(cik)
     #yearly reports first
@@ -177,16 +179,16 @@ def pull_reports(cik, ticker, c_id, start):
         fromhere.append(parsed[3])
         has_content.append(len(parsed[2]) > 0)
 
-    df_10k = pd.DataFrame({"date":dates, "content":content, "fromhere":fromhere, "has_content":has_content})
+    df_10k = pd.DataFrame({"content":content, "fromhere":fromhere, "has_content":has_content}, index=dates)
 
-    print(df_10k)
+    #print(df_10k)
 
     filings_10q = get_filings_by_company(company, "10-K", 20)
     # check if enough
-    #if pd.Timestamp(str(filings_10q[1][-1].content["Period of Report"])) > pd.Timestamp(year=2005, month=12, day=31):
-    #    filings_10q = get_filings_by_company(company, "10-Q", 60)
-    #if pd.Timestamp(str(filings_10q[1][-1].content["Period of Report"])) > pd.Timestamp(year=2005, month=12, day=31):
-    #    filings_10q = get_filings_by_company(company, "10-Q", 96)
+    if pd.Timestamp(str(filings_10q[1][-1].content["Period of Report"])) > pd.Timestamp(year=2005, month=12, day=31):
+        filings_10q = get_filings_by_company(company, "10-Q", 60)
+    if pd.Timestamp(str(filings_10q[1][-1].content["Period of Report"])) > pd.Timestamp(year=2005, month=12, day=31):
+        filings_10q = get_filings_by_company(company, "10-Q", 96)
 
     dates = []
     content = []
@@ -203,22 +205,61 @@ def pull_reports(cik, ticker, c_id, start):
         fromhere.append(parsed[3])
         has_content.append(len(parsed[2]) > 0)
 
-    df_10q = pd.DataFrame({"date": dates, "content": content, "fromhere": fromhere, "has_content": has_content})
+    df_10q = pd.DataFrame({"content": content, "fromhere": fromhere, "has_content": has_content}, index=dates)
 
-    print(df_10q["content"][:250] + " ---- " + df_10q["content"][-250:])
+    #print(df_10q["content"][:250] + " ---- " + df_10q["content"][-250:])
+    return (df_10k, df_10q)
+
+def scrape(location):
+
+    if os.path.isfile(location):
+        company_status_dict = pickle.load(open(location, "rb"))
+    else:
+        company_status_dict = {}
+        for company_id in companies_unique:
+            company_status_dict[company_id] = [False, False]
+        pickle.dump(company_status_dict, open(location, "wb"))
+
+    report_file_name = "data/{ticker}_{id}_{type}.csv"
+
+    i = 0
+
+    for c_id in company_status_dict:
+        i += 1
+        if i > 2:
+            break
+        if not company_status_dict[c_id][0]:
+            df_to_scrape = df_companies[df_companies["company"] == c_id]
+            if len(df_to_scrape.index) > 1:
+                list_10k = []
+                list_10q = []
+                for i, row in df_to_scrape.iterrows():
+                    ticker = row["ticker"]
+                    company_id = row["company"]
+                    df_10k, df_10q = pull_company_reports(row["cik"], ticker, company_id, pd.Timestamp(year=2005, month=12, day=31))
+                    list_10k.append(df_10k)
+                    list_10q.append(df_10q)
+                df_complete_10k = pd.concat(list_10k)
+                df_complete_10q = pd.concat(list_10q)
+            else:
+                row = df_to_scrape.iloc[0]
+                ticker = row["ticker"]
+                company_id = row["company"]
+                df_complete_10k, df_complete_10q = pull_company_reports(row["cik"], ticker, company_id, pd.Timestamp(year=2005, month=12, day=31))
+
+            seems_correct = not ( df_complete_10k["fromhere"].any() or df_complete_10q["fromhere"].any())
 
 
-#for comapny_id in companies_unique:
+            df_complete_10q.to_csv(report_file_name.format(ticker = ticker, id=company_id, type="10-Q"))
+            df_complete_10k.to_csv(report_file_name.format(ticker=ticker, id=company_id, type="10-K"))
 
-df_mo = df_companies[df_companies["company"] == 42]
+            company_status_dict[c_id][0] = True
+            company_status_dict[c_id][1] = seems_correct
+            pickle.dump(company_status_dict, open(location, "wb"))
+            print("scraped reports for {company}. status: {status}".format(company=ticker, status=seems_correct))
 
-for i, row in df_mo.iterrows():
-    pull_reports(row["cik"], row["ticker"], row["company"], pd.Timestamp(year=2005, month=12, day=31))
-
-
-
-
-
+    print("done!")
 
 
 
+scrape("scrape_status_dict.p")
