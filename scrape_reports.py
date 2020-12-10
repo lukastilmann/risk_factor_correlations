@@ -82,8 +82,8 @@ def parse_10q_filing(company, doc_lxml, doc):
                 #else:
                 #    print("got next item but no text!")
             text = text.replace("\n", " ").strip()
-            if len(text) > 4 and not (
-                    any(word in text.lower() for word in ["index", "contents", "item", "factor", "summary"]) and len(
+            if fromhere and len(text) > 4 and not (
+                    any(word in text.lower() for word in ["index", "contents", "item", "factor", "summary", "form", "inc"]) and len(
                     text) < 40):
                 if text[0] in ",;:":
                     current_text = current_text + text
@@ -224,12 +224,12 @@ def scrape(location):
 
     list_issues = []
 
-    i = 0
+    #i = 0
 
     for c_id in company_status_dict:
-        i += 1
-        if i > 2:
-            break
+        #i += 1
+        #if i > 2:
+        #    break
         if not company_status_dict[c_id][0]:
             df_to_scrape = df_companies[df_companies["company"] == c_id]
             if len(df_to_scrape.index) > 1:
