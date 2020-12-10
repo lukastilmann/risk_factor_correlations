@@ -152,6 +152,9 @@ def get_filings_by_company(company, type, n):
     tree = company.get_all_filings(filing_type=type)
     docs_lxml = Company.get_documents(tree, no_of_documents=n)
     docs_data = Company.get_documents(tree, no_of_documents=n, as_documents=True)
+    if not isinstance(docs_lxml, list):
+        docs_lxml = [docs_lxml]
+        docs_data = [docs_data]
 
     return (docs_lxml, docs_data)
 
@@ -160,6 +163,8 @@ def pull_company_reports(cik, ticker, c_id, start):
     company = get_company_by_cik(cik)
     #yearly reports first
     filings_10k = get_filings_by_company(company, "10-K", 13)
+    #if len(filings_10k) < 2:
+        #filings_10k = [filings_10k]
     #check if enough
     if pd.Timestamp(str(filings_10k[1][-1].content["Period of Report"])) > pd.Timestamp(year=2005, month=12, day=31):
         filings_10k = get_filings_by_company(company, "10-K", 26)
