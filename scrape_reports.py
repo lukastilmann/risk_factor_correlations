@@ -252,7 +252,9 @@ def scrape(location):
             seems_correct = (not ( df_complete_10k["fromhere"].any() or df_complete_10q["fromhere"].any())) and df_complete_10k["has_content"].all()
 
             if not seems_correct:
-                list_issues.append(company_id)
+
+                issues = [df_complete_10k["fromhere"].any(), df_complete_10q["fromhere"].any(), not df_complete_10k["has_content"].all()]
+                list_issues.append((company_id, issues))
                 pickle.dump(list_issues, open("list_issues.p", "wb"))
 
 
