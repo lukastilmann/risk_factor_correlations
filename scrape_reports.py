@@ -222,7 +222,10 @@ def scrape(location):
 
     report_file_name = "data/{ticker}_{id}_{type}.csv"
 
-    list_issues = []
+    if os.path.isfile("list_issues.p"):
+        list_issues = pickle.load(open("list_issues.p", "rb"))
+    else:
+        list_issues = []
 
     #i = 0
 
