@@ -247,7 +247,7 @@ def scrape(location):
                 company_id = row["company"]
                 df_complete_10k, df_complete_10q = pull_company_reports(row["cik"], ticker, company_id, pd.Timestamp(year=2005, month=12, day=31))
 
-            seems_correct = not ( df_complete_10k["fromhere"].any() or df_complete_10q["fromhere"].any())
+            seems_correct = (not ( df_complete_10k["fromhere"].any() or df_complete_10q["fromhere"].any())) and df_complete_10k["has_content"].all()
 
 
             df_complete_10q.to_csv(report_file_name.format(ticker = ticker, id=company_id, type="10-Q"))
@@ -257,6 +257,11 @@ def scrape(location):
             company_status_dict[c_id][1] = seems_correct
             pickle.dump(company_status_dict, open(location, "wb"))
             print("scraped reports for {company}. status: {status}".format(company=ticker, status=seems_correct))
+
+        else:
+            ticker = df_companies[df_companies["company"] == c_id].iloc[0]["ticker"]
+            print("the reports for {} have already been downloaded.".format(ticker))
+
 
     print("done!")
 
