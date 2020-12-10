@@ -222,6 +222,8 @@ def scrape(location):
 
     report_file_name = "data/{ticker}_{id}_{type}.csv"
 
+    list_issues = []
+
     i = 0
 
     for c_id in company_status_dict:
@@ -248,6 +250,10 @@ def scrape(location):
                 df_complete_10k, df_complete_10q = pull_company_reports(row["cik"], ticker, company_id, pd.Timestamp(year=2005, month=12, day=31))
 
             seems_correct = (not ( df_complete_10k["fromhere"].any() or df_complete_10q["fromhere"].any())) and df_complete_10k["has_content"].all()
+
+            if not seems_correct:
+                list_issues.append(company_id)
+                pickle.dump(list_issues, open("list_issues.p", "wb"))
 
 
             df_complete_10q.to_csv(report_file_name.format(ticker = ticker, id=company_id, type="10-Q"))
