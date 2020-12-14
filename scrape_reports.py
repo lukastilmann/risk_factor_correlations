@@ -115,14 +115,14 @@ def parse_10k_filing(company, doc_lxml, doc):
         if fromhere:
             if is_item_1b_header(text) or is_10k_item_2_header(text):
                 fromhere = False
-                if len(risk_factors_text) > 5:
+                if len(risk_factors_text) > 10:
                     #print("got item 2 or 1b and has text!")
                     break
                 #else:
                 #    print("got next item but no text!")
             text = text.replace("\n", " ").strip()
-            if len(text) > 4 and not (
-                    any(word in text.lower() for word in ["index", "contents", "item", "factor", "summary"]) and len(
+            if fromhere and len(text) > 4 and not (
+                    any(word in text.lower() for word in ["index", "contents", "item", "factor", "summary", "form", "inc"]) and len(
                     text) < 40):
                 if text[0] in ",;:":
                     current_text = current_text + text
@@ -186,9 +186,11 @@ def pull_company_reports(cik, ticker, c_id, start):
 
     df_10k = pd.DataFrame({"content":content, "fromhere":fromhere, "has_content":has_content}, index=dates)
 
+    df_10k = check_amends(df_10k)
+
     #print(df_10k)
 
-    filings_10q = get_filings_by_company(company, "10-K", 20)
+    filings_10q = get_filings_by_company(company, "10-Q", 20)
     # check if enough
     if pd.Timestamp(str(filings_10q[1][-1].content["Period of Report"])) > pd.Timestamp(year=2005, month=12, day=31):
         filings_10q = get_filings_by_company(company, "10-Q", 60)
@@ -215,6 +217,20 @@ def pull_company_reports(cik, ticker, c_id, start):
     #print(df_10q["content"][:250] + " ---- " + df_10q["content"][-250:])
     return (df_10k, df_10q)
 
+def check_amends(df):
+    df_nan = df[df["has_content"] == False]
+    flags = []
+    for i, row in df_nan.iterrows():
+        df_that_date = df.loc[i]
+        if df_that_date["has_content"].any():
+            flags.append(True)
+        else:
+            flags.append(False)
+    if all(flags):
+        return df[df["has_content"]]
+    else:
+        return df
+
 def scrape(location):
 
     if os.path.isfile(location):
@@ -239,6 +255,7 @@ def scrape(location):
         #if i > 2:
         #    break
         if not company_status_dict[c_id][0]:
+        #if True:
             df_to_scrape = df_companies[df_companies["company"] == c_id]
             if len(df_to_scrape.index) > 1:
                 list_10k = []
@@ -256,6 +273,7 @@ def scrape(location):
                 ticker = row["ticker"]
                 company_id = row["company"]
                 df_complete_10k, df_complete_10q = pull_company_reports(row["cik"], ticker, company_id, pd.Timestamp(year=2005, month=12, day=31))
+
 
             seems_correct = (not ( df_complete_10k["fromhere"].any() or df_complete_10q["fromhere"].any())) and df_complete_10k["has_content"].all()
 
@@ -283,4 +301,4 @@ def scrape(location):
 
 
 
-scrape("scrape_status_dict.p")
+scrape("scrape_status_dict_3.p")
