@@ -13,8 +13,8 @@ companies_unique = df_companies["company"].dropna().unique()
 def is_item_1a_header(text):
     if "1A" in text:
         # print(text)
-        text = text.replace("&nbsp;", " ").strip().lower()
-        if (len(text) < 31 and "tem" in text and "1a" in text) and (
+        text = text.replace("&nbsp;", "").strip().lower()
+        if (len(text) < 31 and "1a" in text) and (
                 len(text) < 13 or ("risk" in text or "factors" in text)):
             # print(text)
             return True
@@ -24,8 +24,8 @@ def is_item_1a_header(text):
 
 def is_item_1b_header(text):
     if "1B" in text:
-        text = text.replace("&nbsp;", " ").strip().lower()
-        if (len(text) < 48 and "tem" in text and "1b" in text) and (
+        text = text.replace("&nbsp;", "").strip().lower()
+        if (len(text) < 48 and "1b" in text) and (
                 len(text) < 13 or ("unresolved" in text or "staff" in text or "comments" in text)):
             return True
 
@@ -34,17 +34,18 @@ def is_item_1b_header(text):
 
 def is_10q_item_2_header(text):
     if len(text) < 150 and "2" in text:
-        text = text.replace("&nbsp;", " ").strip().lower()
-        if (len(text) < 85 and "tem" in text and "2" in text) and (
-                len(text) < 12 or (any(word in text for word in ["unregistered", "equity", "securities", "proceeds"]))):
+        text = text.replace("&nbsp;", "").strip().lower()
+        if ((len(text) < 85  and "2" in text) and (
+                len(text) < 12 or (any(word in text for word in ["unregistered", "equity", "securities", "proceeds"]))))\
+                or ((any(word in text for word in ["issuer", "purchases"])) and ("2" in text or len(text) < 85) ):
             return True
 
     return False
 
 def is_10k_item_2_header(text):
     if len(text) < 150 and "2" in text:
-        text = text.replace("&nbsp;", " ").strip().lower()
-        if (len(text) < 30 and "tem" in text and "2" in text) and (
+        text = text.replace("&nbsp;", "").strip().lower()
+        if (len(text) < 30 and "2" in text) and (
                 len(text) < 12 or ("properties" in text)):
             return True
 
@@ -52,8 +53,8 @@ def is_10k_item_2_header(text):
 
 def is_item_6_header(text):
     if len(text) < 150 and "6" in text:
-        text = text.replace("&nbsp;", " ").strip().lower()
-        if (len(text) < 27 and "tem" in text and "6" in text) and (
+        text = text.replace("&nbsp;", "").strip().lower()
+        if (len(text) < 27 and ("6" in text or "5" in text)) and (
                 len(text) < 12 or ("exhibits" in text)):
             return True
 
@@ -162,7 +163,9 @@ def pull_company_reports(cik, ticker, c_id, start):
 
     company = get_company_by_cik(cik)
     #yearly reports first
-    filings_10k = get_filings_by_company(company, "10-K", 13)
+    filings_10k = get_filings_by_company(company, "10-K", 14)
+    if pd.Timestamp(str(filings_10k[1][-1].content["Period of Report"])) < pd.Timestamp(year=2005, month=12, day=31):
+        filings_10k = (filings_10k[0][:-1], filings_10k[1][:-1])
     #if len(filings_10k) < 2:
         #filings_10k = [filings_10k]
     #check if enough
@@ -237,18 +240,22 @@ def scrape(location):
         company_status_dict = pickle.load(open(location, "rb"))
     else:
         company_status_dict = {}
-        for company_id in companies_unique:
-            company_status_dict[company_id] = [False, False]
+        #for company_id in companies_unique:
+        #    company_status_dict[company_id] = [False, False]
+        for issue in pickle.load(open("list_issues.p", "rb")):
+            company_status_dict[issue[0]] = [False, False]
         pickle.dump(company_status_dict, open(location, "wb"))
 
     report_file_name = "data/{ticker}_{id}_{type}.csv"
+    issues_file = "list_issues_2.p"
 
-    if os.path.isfile("list_issues.p"):
-        list_issues = pickle.load(open("list_issues.p", "rb"))
+    if os.path.isfile(issues_file):
+        list_issues = pickle.load(open(issues_file, "rb"))
     else:
         list_issues = []
 
     #i = 0
+
 
     for c_id in company_status_dict:
         #i += 1
@@ -281,7 +288,7 @@ def scrape(location):
 
                 issues = [df_complete_10k["fromhere"].any(), df_complete_10q["fromhere"].any(), not df_complete_10k["has_content"].all()]
                 list_issues.append((company_id, issues))
-                pickle.dump(list_issues, open("list_issues.p", "wb"))
+                pickle.dump(list_issues, open(issues_file, "wb"))
 
 
             df_complete_10q.to_csv(report_file_name.format(ticker = ticker, id=company_id, type="10-Q"))
@@ -301,4 +308,4 @@ def scrape(location):
 
 
 
-scrape("scrape_status_dict_3.p")
+scrape("scrape_status_dict_4.p")
