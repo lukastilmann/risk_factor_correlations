@@ -10,13 +10,12 @@ df_companies = pd.read_csv(companies, sep=";")
 companies_unique = df_companies["company"].dropna().unique()
 
 
-def is_item_1a_header(text):
+def is_item_1a_header(text, prev):
     if "1A" in text:
         # print(text)
         text = text.replace("&nbsp;", "").strip().lower()
-        if (len(text) < 31 and "1a" in text) and (
-                len(text) < 13 or ("risk" in text or "factors" in text)):
-            # print(text)
+        if "1a" in text and ((len(text) < 4 and "item"in prev and len(prev) < 10) or (len(text) < 7 and "m" in text) or (len(text) < 10 and "tem" in text)
+                             or (len(text) < 13 and "item" in text) or (len(text) < 31 and ("risk" in text or "factor" in text))):
             return True
 
     return False
@@ -25,7 +24,7 @@ def is_item_1a_header(text):
 def is_item_1b_header(text):
     if "1B" in text:
         text = text.replace("&nbsp;", "").strip().lower()
-        if (len(text) < 48 and "1b" in text) and (
+        if (len(text) < 48 and "m" in text and "1b" in text) and (
                 len(text) < 13 or ("unresolved" in text or "staff" in text or "comments" in text)):
             return True
 
@@ -35,7 +34,7 @@ def is_item_1b_header(text):
 def is_10q_item_2_header(text):
     if len(text) < 150 and "2" in text:
         text = text.replace("&nbsp;", "").strip().lower()
-        if ((len(text) < 85  and "2" in text) and (
+        if ((len(text) < 85 and "m" in text and "2" in text) and (
                 len(text) < 12 or (any(word in text for word in ["unregistered", "equity", "securities", "proceeds"]))))\
                 or ((any(word in text for word in ["issuer", "purchases"])) and ("2" in text or len(text) < 85) ):
             return True
@@ -45,7 +44,7 @@ def is_10q_item_2_header(text):
 def is_10k_item_2_header(text):
     if len(text) < 150 and "2" in text:
         text = text.replace("&nbsp;", "").strip().lower()
-        if (len(text) < 30 and "2" in text) and (
+        if (len(text) < 30 and "m" in text and "2" in text) and (
                 len(text) < 12 or ("properties" in text)):
             return True
 
@@ -54,7 +53,7 @@ def is_10k_item_2_header(text):
 def is_item_6_header(text):
     if len(text) < 150 and "6" in text:
         text = text.replace("&nbsp;", "").strip().lower()
-        if (len(text) < 27 and ("6" in text or "5" in text)) and (
+        if (len(text) < 27 and "m" in text and ("6" in text or "5" in text)) and (
                 len(text) < 12 or ("exhibits" in text)):
             return True
 
@@ -64,6 +63,7 @@ def is_item_6_header(text):
 def print_filing(tuple):
   print(str(not tuple[3]) + " " + tuple[0] + " - " + tuple[1] + " -" + tuple[2][:250])
 
+
 def parse_10q_filing(company, doc_lxml, doc):
     text_elem = doc_lxml.xpath("//text()")
 
@@ -72,6 +72,7 @@ def parse_10q_filing(company, doc_lxml, doc):
     risk_factors_text = []
 
     # print(text_elem)
+    prev = ""
 
     for text in text_elem:
         if fromhere:
@@ -93,8 +94,9 @@ def parse_10q_filing(company, doc_lxml, doc):
                 if text[-1] in ".!?":
                     risk_factors_text.append(current_text + " ")
                     current_text = ""
-        if is_item_1a_header(text):
+        if is_item_1a_header(text, prev):
             fromhere = True
+        prev = text
             #print("item 1a start")
 
     text_content = "\n".join(risk_factors_text)
