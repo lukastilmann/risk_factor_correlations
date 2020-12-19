@@ -70,7 +70,9 @@ def is_item_6_header(text, prev):
     if "6" in text and len(text) < 250:
         if len(text) < 3 and  "tem" in prev.lower():
             return True
-        return is_item_header("6", "exhibits", text, ["exhibits"]) or is_item_header("6", "exhibits and reports on form 8-k", text, ["exhibits", "reports", "form"])
+        return is_item_header("6", "exhibits", text, ["exhibits"]) or \
+               is_item_header("6", "exhibits and reports on form 8-k", text, ["exhibits", "reports", "form"]) or \
+               is_item_header("5", "exhibits", text, ["exhibits"])
     return False
 
 
