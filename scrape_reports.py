@@ -9,6 +9,29 @@ df_companies = pd.read_csv(companies, sep=";")
 
 companies_unique = df_companies["company"].dropna().unique()
 
+def is_item_header(nr, title, text, prev, title_key_word):
+    bare_len = len("item " + nr + title)
+
+    text = text.replace("&nbsp;", "").strip().lower()
+
+    l = len(text)
+
+    if l < len("item " + nr) + 4:
+        if l < 5 + len(nr) and "m" in text and nr in text:
+            return True
+        if l < 6 + len(nr) and "em" in text and nr in text:
+            return True
+        if l < 7 + len(nr) and "tem" in text and nr in text:
+            return True
+        if "item" in text and nr in text:
+            return True
+
+    if l < bare_len + 5:
+        if any(word in text for word in title_key_word):
+            return True
+
+    return False
+
 
 def is_item_1a_header(text, prev):
     if "1A" in text:
