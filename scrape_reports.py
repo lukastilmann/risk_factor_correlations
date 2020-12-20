@@ -137,7 +137,6 @@ def parse_10k_filing(company, doc_lxml, doc):
     for text in text_elem:
         if fromhere:
             if is_item_1b_header(text, prev) or is_10k_item_2_header(text, prev):
-                print(text)
                 fromhere = False
                 if len(risk_factors_text) > 10:
                     #print("got item 2 or 1b and has text!")
@@ -157,7 +156,6 @@ def parse_10k_filing(company, doc_lxml, doc):
                     current_text = ""
         if is_item_1a_header(text, prev):
             fromhere = True
-            print(text)
         prev = text
             #print("item 1a start")
 
