@@ -9,12 +9,19 @@ df_companies = pd.read_csv(companies, sep=";")
 
 companies_unique = df_companies["company"].dropna().unique()
 
-def is_item_header(nr, title, text, title_key_word):
+def is_item_header(nr, title, text, prev, title_key_word):
     bare_len = len("item " + nr + title)
 
-    text = text.replace("&nbsp;", "").replace(".", "").strip().lower()
+    for c in ["&nbsp;", ".", " ", "\n", "\xa0"]:
+        text = text.replace(c, "")
+
+
+    text = text.lower()
 
     length = len(text)
+
+    if nr in text and length < len(nr) + 2 and "item" in prev.lower() and len(prev.replace("&nbsp;", "")) < 10:
+        return True
 
     if length < len("item " + nr) + 4:
         if length < 4 + len(nr) and "m" in text and nr in text:
@@ -36,16 +43,17 @@ def is_item_header(nr, title, text, title_key_word):
 def is_item_1a_header(text, prev):
     if len(text) == 1 and "A" in text and "1" in prev and len(prev.replace("&nbsp;", "").strip()) < 10:
         return True
-    if "1A" in text and len(text) < 200:
-        return is_item_header("1a", "risk factors", text, ["risk", "factor"])
+
+    if ("1A" in text or "1a" in text) and len(text) < 200:
+        return is_item_header("1a", "risk factors", text, prev, ["risk", "factor"])
     return False
 
 
 def is_item_1b_header(text, prev):
     if len(text) == 1 and "B" in text and "1" in prev and len(prev.replace("&nbsp;", "").strip()) < 10 :
         return True
-    if "1B" in text and len(text) < 250:
-        return is_item_header("1b", "unresolved staff comments", text, ["unresolved", "staff", "comments"])
+    if ("1B" in text or "1b" in text) and len(text) < 250:
+        return is_item_header("1b", "unresolved staff comments", text, prev, ["unresolved", "staff", "comments"])
     return False
 
 
@@ -53,10 +61,10 @@ def is_item_1b_header(text, prev):
 def is_10q_item_2_header(text, prev):
     if "2" in text and len(text) < 250:
         if len(text) < 3 and  "tem" in prev.lower() and len(prev.replace("&nbsp;", "").strip()) < 10:
-            print("on prev: "+ prev)
+            #print("on prev: "+ prev)
             return True
-        return is_item_header("2", "unregistered sales of equity sequrities and use of proceeds", text, ["unregistered", "sales", "equity", "securities", "proceeds"]) \
-               or is_item_header("2", "unregistered sales of equity sequrities and issuer purchases of equity securities", text, ["unregistered", "sales", "equity", "securities", "purchases"])
+        return is_item_header("2", "unregistered sales of equity sequrities and use of proceeds", text, prev, ["unregistered", "sales", "equity", "securities", "proceeds"]) \
+               or is_item_header("2", "unregistered sales of equity sequrities and issuer purchases of equity securities", text, prev, ["unregistered", "sales", "equity", "securities", "purchases"])
     return False
 
 
@@ -65,16 +73,16 @@ def is_10k_item_2_header(text, prev):
         if len(text) < 3 and  "tem" in prev.lower() and len(prev.replace("&nbsp;", "").strip()) < 10:
             print("on prev: " + prev)
             return True
-        return is_item_header("2", "properties", text, ["properties"])
+        return is_item_header("2", "properties", text, prev, ["properties"])
     return False
 
 def is_item_6_header(text, prev):
     if "6" in text and len(text) < 250:
         if len(text) < 3 and  "tem" in prev.lower() and len(prev.replace("&nbsp;", "").strip()) < 10:
             return True
-        return is_item_header("6", "exhibits", text, ["exhibits"]) or \
-               is_item_header("6", "exhibits and reports on form 8-k", text, ["exhibits", "reports", "form"]) or \
-               is_item_header("5", "exhibits", text, ["exhibits"])
+        return is_item_header("6", "exhibits", text, prev, ["exhibits"]) or \
+               is_item_header("6", "exhibits and reports on form 8-k", text, prev, ["exhibits", "reports", "form"]) or \
+               is_item_header("5", "exhibits", text, prev, ["exhibits"])
     return False
 
 
@@ -102,7 +110,7 @@ def parse_10q_filing(company, doc_lxml, doc):
                     break
                 #else:
                 #    print("got next item but no text!")
-            text = text.replace("\n", " ").strip()
+            text = text.replace("\n", " ").replace("\xa0", " ").strip()
             if fromhere and len(text) > 4 and not (
                     any(word in text.lower() for word in ["index", "contents", "item", "factor", "summary", "form", "inc"]) and len(
                     text) < 40):
@@ -143,7 +151,7 @@ def parse_10k_filing(company, doc_lxml, doc):
                     break
                 #else:
                 #    print("got next item but no text!")
-            text = text.replace("\n", " ").strip()
+            text = text.replace("\n", " ").replace("\xa0", " ").strip()
             if fromhere and len(text) > 3 and not (
                     any(word in text.lower() for word in ["index", "contents", "item", "factor", "summary", "form", "inc"]) and len(
                     text) < 40):
@@ -257,20 +265,18 @@ def check_amends(df):
     else:
         return df
 
-def scrape(location):
+def scrape(location, issues):
 
     if os.path.isfile(location):
         company_status_dict = pickle.load(open(location, "rb"))
     else:
         company_status_dict = {}
-        #for company_id in companies_unique:
-        #    company_status_dict[company_id] = [False, False]
-        for issue in pickle.load(open("list_issues.p", "rb")):
-            company_status_dict[issue[0]] = [False, False]
+        for company_id in companies_unique:
+            company_status_dict[company_id] = [False, False]
         pickle.dump(company_status_dict, open(location, "wb"))
 
     report_file_name = "data/{ticker}_{id}_{type}.csv"
-    issues_file = "list_issues_4.p"
+    issues_file = issues
 
     if os.path.isfile(issues_file):
         list_issues = pickle.load(open(issues_file, "rb"))
@@ -331,4 +337,4 @@ def scrape(location):
 
 
 
-scrape("scrape_status_dict_4.p")
+scrape("final_scrape_status_dict.p", "final_list_issues.p")
