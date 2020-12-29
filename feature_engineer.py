@@ -91,8 +91,7 @@ def create_columns():
                 df_reports[row["ticker"] + "_" + str(row["company"])] = df
 
 
-    print(df_reports)
-
+    df_reports.to_csv("data/reports.csv")
 
 
 create_columns()
