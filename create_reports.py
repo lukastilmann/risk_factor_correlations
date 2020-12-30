@@ -14,7 +14,7 @@ def consolidate_reports(df):
         new_df = pd.DataFrame({"content": [new_content]}, index=df.iloc[0].index)
         return new_df
 
-def create_columns():
+def create_columns(with_duplicates=True):
     companies = df_companies.loc[:,["company", "ticker"]].dropna().drop_duplicates()
 
     file_format = "data/{ticker}_{id}_{type}.csv"
@@ -77,12 +77,17 @@ def create_columns():
 
                     else:
                         report = pd.NA
-                    # report = df_10q.loc[quarter_end_date:new_quarter_end_date].iloc[-1]["content"]
+
 
                     if not pd.isna(report):
                         content = report_10k + report
                         reports.append(content)
                         dates.append(quarter_end_date)
+                        report_10k = content
+                    else:
+                        if with_duplicates:
+                            reports.append(report_10k)
+                            dates.append(quarter_end_date)
 
 
         if len(reports) > 0:
@@ -91,7 +96,16 @@ def create_columns():
                 df_reports[row["ticker"] + "_" + str(row["company"])] = df
 
 
-    df_reports.to_csv("data/reports.csv", index_label="date")
+    if with_duplicates:
+        df_reports.to_csv("data/reports_with_duplicates.csv", index_label="date")
+    else:
+        df_reports.to_csv("data/reports_without_duplicates.csv", index_label="date")
 
 
-create_columns()
+
+
+
+    print(df_reports.head())
+
+
+create_columns(False)
