@@ -9,14 +9,14 @@ df_companies = pd.read_csv(file, sep=";")
 
 df_all = pd.DataFrame()
 
-tickers = df_companies["ticker"].dropna().unique()
+companies = df_companies.loc[:,["company", "ticker"]].dropna().drop_duplicates()
 
-for symbol in tickers:
-        df = pd.read_csv(dir.format(symbol), index_col="Date")
+for i, row in companies.iterrows():
+        df = pd.read_csv(dir.format(row["ticker"]), index_col="Date")
         df.index = pd.to_datetime(df.index)
         df["Move"] = df["Close"].pct_change()
-        df_all[symbol] = df["Move"]
+        df_all[row["ticker"] + "_" + str(row["company"])] = df["Move"]
 
-df_all.to_csv("data/stock_retuns.csv")
+df_all.to_csv("data/stock_returns.csv")
 
 
