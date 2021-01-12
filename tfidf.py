@@ -1,9 +1,11 @@
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.metrics.pairwise import cosine_similarity
+from sklearn.linear_model import LinearRegression
 import pandas as pd
 import os
 import pickle
 import numpy as np
+from datetime import datetime
 
 def train_model(df):
     corpus = df.values.flatten()
@@ -69,25 +71,39 @@ def predict_cov_sample(prev_sample):
     return compute_cov_matrix(prev_sample).values
 
 
-def predict_cov_cos_similarity(prev_sample, similarities):
+def predict_cov_cos_similarity(prev_sample, prev_similarities, similarities):
 
     prev_sample = prev_sample.values
+    prev_sample_wout_diag = prev_sample[~np.eye(prev_sample.shape[0], dtype=bool)].reshape(prev_sample.shape[0], -1)
 
     similarities = similarities.values
+    similarities_wout_diag = similarities[~np.eye(similarities.shape[0], dtype=bool)].reshape(similarities.shape[0], -1)
 
-    mean_cov = np.mean(prev_sample)
+    prev_similarities = prev_similarities.values
+    prev_similarities_wout_diag = prev_similarities[~np.eye(prev_similarities.shape[0], dtype=bool)].reshape(prev_similarities.shape[0], -1)
 
-    sigma_cov = np.std(prev_sample)
 
-    mean_sim = np.mean(similarities)
+    shape = similarities.shape
+    prev_similarities_wout_diag = prev_similarities_wout_diag.flatten().reshape(-1,1)
+    prev_sample_wout_diag = prev_sample_wout_diag.flatten().reshape(-1,1)
+    similarities = similarities.flatten().reshape(-1,1)
+    mean_sim = np.mean(prev_similarities_wout_diag)
+    sim_prev_demeaned = prev_similarities_wout_diag - mean_sim
+    similarities_demeaned = similarities - mean_sim
 
-    sigma_sim = np.std(similarities)
+    lr = LinearRegression()
+    lr.fit(sim_prev_demeaned, prev_sample_wout_diag)
 
-    c = (mean_sim - similarities) / sigma_sim
+    pred = lr.predict(similarities_demeaned)
 
-    #print(c)
+    pred = pred.reshape(shape)
 
-    pred = mean_cov - c * sigma_cov
+    diag_prev = prev_sample.diagonal()
+
+    pred[np.diag_indices_from(pred)] = diag_prev
+
+    print(lr.intercept_)
+    print(lr.coef_)
 
     return pred
 
@@ -108,20 +124,49 @@ def eval_predictions(true, pred):
 
 
 
-df = pd.read_csv("data/reports.csv", dtype="string", index_col="date")
-df.index = pd.to_datetime(df.index)
+df_reports = pd.read_csv("data/reports.csv", dtype="string", index_col="date")
+df_reports.index = pd.to_datetime(df_reports.index)
+df_returns = pd.read_csv("data/stock_returns.csv", index_col="Date")
+df_returns.index = pd.to_datetime(df_returns.index)
 
 if os.path.isfile("vectorizer.p"):
     vectorizer = pickle.load(open("vectorizer.p", "rb"))
 else:
-    vectorizer = train_model(df)
+    vectorizer = train_model(df_reports)
     pickle.dump(vectorizer, open("vectorizer.p", "wb"))
 
+train_first = datetime(year=2005, month=12, day=31)
+train_last = datetime(year=2018, month=9, day=30)
+test_first = datetime(year=2018, month=12, day=31)
+test_last = datetime(year=2020, month=6, day=30)
+
+train_range = pd.date_range(train_first, train_last, freq="Q")
+test_range = pd.date_range(test_first, test_last, freq="Q")
+
+for date in train_range:
+    returns_stop = date + pd.tseries.offsets.QuarterEnd()
+
+    reports = get_reports_for_date(df_reports, date)
+    returns = get_returns_for_period(df_returns, date + pd.DateOffset(days=1), returns_stop)
+
+    similarities = compute_cosine_similarity_matrix(reports)
+    cov_matrix = compute_cov_matrix(returns)
+
+    similarities, cov = df_find_intersection([similarities, cov_matrix])
+
+
+    print(similarities.shape)
+    print(cov.shape)
+
+
+#print(test_range)
+
+'''
 reports = get_reports_for_date(df, "31-12-2006")
-returns = pd.read_csv("data/stock_returns.csv", index_col="Date")
-returns.index = pd.to_datetime(returns.index)
+reports_prev = get_reports_for_date(df, "30-09-2006")
 
 similarities = compute_cosine_similarity_matrix(reports)
+similarities_prev = compute_cosine_similarity_matrix(reports_prev)
 
 returns_period = get_returns_for_period(returns, "01-01-2007", "31-03-2007")
 cov = compute_cov_matrix(returns_period)
@@ -129,13 +174,13 @@ cov = compute_cov_matrix(returns_period)
 returns_prev_quarter = get_returns_for_period(returns, "01-10-2006", "31-12-2006")
 cov_prev_sample = compute_cov_matrix(returns_prev_quarter)
 
-cov, similarities, cov_prev_sample = df_find_intersection([cov, similarities, cov_prev_sample])
+cov, similarities, similarities_prev, cov_prev_sample = df_find_intersection([cov, similarities, similarities_prev, cov_prev_sample])
 
 
 #returns_prev_quarter, similarities = returns_reports_in_both(returns_prev_quarter, similarities)
 #pred_sample = predict_cov_sample(returns_prev_quarter)
 
-pred_sim = predict_cov_cos_similarity(cov_prev_sample, similarities)
+pred_sim = predict_cov_cos_similarity(cov_prev_sample,similarities_prev, similarities)
 pred_mean = predict_mean(cov_prev_sample)
 
 print(eval_predictions(cov.values, cov_prev_sample.values))
@@ -149,3 +194,4 @@ print(eval_predictions(cov.values, pred_mean))
 #print(returns_reports_in_both(cov, similarities)[0].shape)
 #print(returns_reports_in_both(cov, similarities)[1].shape)
 
+'''
