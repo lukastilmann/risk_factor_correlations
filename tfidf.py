@@ -6,6 +6,8 @@ import os
 import pickle
 import numpy as np
 from datetime import datetime
+from sklearn.metrics import mean_squared_error, r2_score
+import matplotlib.pyplot as plt
 
 def train_model(df):
     corpus = df.values.flatten()
@@ -43,7 +45,8 @@ def get_returns_for_period(df, start, stop):
 
 def compute_cov_matrix(returns):
 
-    matrix = np.cov(returns.values.transpose())
+    #matrix = np.cov(returns.values.transpose())
+    matrix = np.corrcoef(returns.values.transpose())
 
     df = pd.DataFrame(matrix, index=returns.columns, columns=returns.columns)
 
@@ -140,8 +143,21 @@ train_last = datetime(year=2018, month=9, day=30)
 test_first = datetime(year=2018, month=12, day=31)
 test_last = datetime(year=2020, month=6, day=30)
 
-train_range = pd.date_range(train_first, train_last, freq="Q")
-test_range = pd.date_range(test_first, test_last, freq="Q")
+#train_range = pd.date_range(train_first, train_last, freq="Q")
+#test_range = pd.date_range(test_first, test_last, freq="Q")
+
+#print(df_reports)
+
+df_reports_train = df_reports.loc[train_first:train_last]
+
+df_reports_test = df_reports.loc[test_first:test_last]
+
+train_range = df_reports_train.index
+
+train_x = []
+train_y = []
+mean_covs = []
+mean_sims = []
 
 for date in train_range:
     returns_stop = date + pd.tseries.offsets.QuarterEnd()
@@ -154,9 +170,91 @@ for date in train_range:
 
     similarities, cov = df_find_intersection([similarities, cov_matrix])
 
+    similarities = similarities.values
 
-    print(similarities.shape)
-    print(cov.shape)
+    cov = cov.values
+
+    similarities = similarities[~np.eye(similarities.shape[0], dtype=bool)].reshape(-1,1)
+
+    cov = cov[~np.eye(cov.shape[0], dtype=bool)].reshape(-1,1)
+
+    train_x.append(similarities)
+
+    train_y.append(cov)
+
+    mean_covs.append(cov.mean())
+
+    mean_sims.append(similarities.mean())
+
+
+
+
+train_x = np.concatenate(train_x)
+train_y = np.concatenate(train_y)
+
+test_range = df_reports_test.index
+
+test_x = []
+test_y = []
+
+for date in test_range:
+    returns_stop = date + pd.tseries.offsets.QuarterEnd()
+
+    reports = get_reports_for_date(df_reports, date)
+    returns = get_returns_for_period(df_returns, date + pd.DateOffset(days=1), returns_stop)
+
+    similarities = compute_cosine_similarity_matrix(reports)
+    cov_matrix = compute_cov_matrix(returns)
+
+    similarities, cov = df_find_intersection([similarities, cov_matrix])
+
+    similarities = similarities.values
+
+    cov = cov.values
+
+    similarities = similarities[~np.eye(similarities.shape[0], dtype=bool)].reshape(-1,1)
+
+    cov = cov[~np.eye(cov.shape[0], dtype=bool)].reshape(-1,1)
+
+    test_x.append(similarities)
+
+    test_y.append(cov)
+
+
+test_x = np.concatenate(test_x)
+test_y = np.concatenate(test_y)
+
+x_mean = np.mean(train_x)
+
+#print(x_mean)
+
+train_x = train_x - x_mean
+test_x = test_x - x_mean
+
+lr = LinearRegression()
+
+lr.fit(train_x, train_y)
+
+#print(lr.coef_)
+
+pred_y = lr.predict(test_x)
+
+mean_y = np.full(test_y.shape, np.mean(train_y))
+print("----predictions----")
+print("mse: " + str(mean_squared_error(test_y, pred_y)))
+
+print("r2: " + str(r2_score(test_y, pred_y)))
+
+print("----baseline----")
+print("mse: " + str(mean_squared_error(test_y, mean_y)))
+
+print("r2: " + str(r2_score(test_y, mean_y)))
+
+#plt.scatter(mean_covs, mean_sims)
+
+#plt.show()
+
+
 
 
 #print(test_range)
