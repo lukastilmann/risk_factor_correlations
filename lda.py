@@ -2,12 +2,14 @@ from sklearn.feature_extraction.text import TfidfVectorizer, CountVectorizer
 from sklearn.decomposition import LatentDirichletAllocation
 from sklearn.metrics.pairwise import cosine_similarity
 from sklearn.linear_model import LinearRegression
+from sklearn.covariance import LedoitWolf
 import pandas as pd
 import os
 import pickle
 import numpy as np
 from datetime import datetime
 from sklearn.metrics import mean_squared_error, r2_score
+from scipy.optimize import minimize
 import matplotlib.pyplot as plt
 
 def train_model(df):
@@ -56,8 +58,8 @@ def get_returns_for_period(df, start, stop):
 
 def compute_cov_matrix(returns):
 
-    #matrix = np.cov(returns.values.transpose())
-    matrix = np.corrcoef(returns.values.transpose())
+    matrix = np.cov(returns.values.transpose())
+    #matrix = np.corrcoef(returns.values.transpose())
 
     df = pd.DataFrame(matrix, index=returns.columns, columns=returns.columns)
 
@@ -135,6 +137,57 @@ def predict_mean(prev_sample):
 def eval_predictions(true, pred):
     return (np.square(true - pred)).mean(axis=None)
 
+def calculate_portfolio_var(w, sigma):
+
+    w = np.asmatrix(w)
+    sigma = np.asmatrix(sigma)
+
+    print((w.T * sigma) * w)
+
+    return(w.transpose()*sigma*w)
+
+
+def optimal_portfolio_weights(sigma):
+
+    size = sigma.shape[0]
+    sigma = np.asmatrix(sigma)
+    #cons = ({'type': 'eq', 'fun': lambda x:  np.sum(x)-1.0})
+    #start_weights = np.full((size, 1), 1 / size)
+
+    one = np.ones((size, 1))
+    one = np.asmatrix(one)
+
+    w_star = (np.linalg.inv(sigma) * one) / (one.T * np.linalg.inv(sigma) * one)
+
+    #print(np.sum(w_star))
+
+    return  w_star
+
+def realized_portfolio_returns(returns, w):
+
+    w = np.asarray(w).T
+
+    #print(returns)
+
+    #print(w)
+
+    portfolio_returns = returns *  w
+
+    #print(portfolio_returns)
+
+    #print(portfolio_returns.shape)
+
+    whole_portfolio_returns = np.sum(portfolio_returns, axis=1)
+
+    return_mean = whole_portfolio_returns.mean()
+
+    return_var = whole_portfolio_returns.var()
+
+    sharpe = (return_mean / np.sqrt(return_var)) * np.sqrt(252)
+
+    print(sharpe)
+
+
 
 
 
@@ -142,6 +195,8 @@ df_reports = pd.read_csv("data/reports.csv", dtype="string", index_col="date")
 df_reports.index = pd.to_datetime(df_reports.index)
 df_returns = pd.read_csv("data/stock_returns.csv", index_col="Date")
 df_returns.index = pd.to_datetime(df_returns.index)
+
+'''
 
 if os.path.isfile("vectorizer_lda_tuple_25.p"):
     vectorizer, lda = pickle.load(open("vectorizer_lda_tuple_25.p", "rb"))
@@ -251,6 +306,52 @@ lr.fit(train_x, train_y)
 pred_y = lr.predict(test_x)
 
 mean_y = np.full(test_y.shape, np.mean(train_y))
+
+'''
+
+returns_period = get_returns_for_period(df_returns, datetime(year=2017, month=1, day=1), datetime(year=2018, month=12, day=31))
+
+returns_out_of_sample = get_returns_for_period(df_returns, datetime(year=2019, month=1, day=1), datetime(year=2019, month=3, day=31))
+
+columns_both = set(returns_period.columns).intersection(returns_out_of_sample.columns)
+#returns_sample, returns_out_of_sample = df_find_intersection([returns_period, returns_out_of_sample])
+
+returns_sample = returns_period.loc[:,columns_both]
+
+returns_out_of_sample = returns_out_of_sample.loc[:,columns_both]
+
+cov = predict_cov_sample(returns_sample)
+
+LW = LedoitWolf()
+
+cov_lw = LW.fit(returns_sample).covariance_
+
+#print(cov)
+
+w = optimal_portfolio_weights(cov)
+
+w_lw = optimal_portfolio_weights(cov_lw)
+
+random_weights = np.random.random_sample(w.shape)
+
+w_random = random_weights / random_weights.sum()
+
+w_market_portfolio = np.full(w.shape, 1 / w.shape[0])
+
+realized_portfolio_returns(returns_out_of_sample.values, w_market_portfolio)
+realized_portfolio_returns(returns_out_of_sample.values, w_random)
+realized_portfolio_returns(returns_out_of_sample, w_lw)
+realized_portfolio_returns(returns_out_of_sample.values, w)
+
+
+
+
+
+
+
+#print(calculate_portfolio_var(w, cov))
+
+'''
 print("----predictions----")
 print("mse: " + str(mean_squared_error(test_y, pred_y)))
 
@@ -260,3 +361,4 @@ print("----baseline----")
 print("mse: " + str(mean_squared_error(test_y, mean_y)))
 
 print("r2: " + str(r2_score(test_y, mean_y)))
+'''
