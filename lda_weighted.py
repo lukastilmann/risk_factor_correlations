@@ -30,22 +30,18 @@ def train_model(df):
 
 def get_reports_for_date(df, date):
 
-    df_date = df.loc[date]
-    df_date = df_date.dropna()
+    df_date = df.loc[date:date]
+    df_date = df_date.dropna(axis=1)
 
     return df_date
 
-def compute_cosine_similarity_matrix(reports):
+def lda_features(reports, vectorizer, lda):
 
     vector_bow = vectorizer.transform(reports)
 
     vector_lda = lda.transform(vector_bow)
 
-    matrix = cosine_similarity(vector_lda)
-
-    df = pd.DataFrame(matrix, index=reports.index, columns=reports.index)
-
-    return df
+    return vector_lda
 
 def get_returns_for_period(df, start, stop):
 
@@ -65,19 +61,22 @@ def compute_cov_matrix(returns):
 
     return df
 
-def df_find_intersection(list_dfs):
+def find_column_intersection(list_dfs):
 
     list_columns = []
 
     for df in list_dfs:
+        #print(df.columns)
         list_columns.append(set(df.columns))
 
     in_all = set.intersection(*list_columns)
 
     list_dfs_new = []
 
+    #print(in_all)
+
     for df in list_dfs:
-        list_dfs_new.append(df.loc[in_all,in_all])
+        list_dfs_new.append(df[in_all])
 
     return list_dfs_new
 
@@ -142,7 +141,7 @@ def calculate_portfolio_var(w, sigma):
     w = np.asmatrix(w)
     sigma = np.asmatrix(sigma)
 
-    print((w.T * sigma) * w)
+    #print((w.T * sigma) * w)
 
     return(w.transpose()*sigma*w)
 
@@ -202,7 +201,7 @@ def exp_dist(x_1, x_2):
 
     return sim
 
-def get_similarities(mat, feature_data, sim_function):
+def get_similarities_cov(mat, feature_data, sim_function):
 
     flat_upper = mat[np.triu_indices(mat.shape[0], k=1)]
 
@@ -215,7 +214,7 @@ def get_similarities(mat, feature_data, sim_function):
         for j in range(i+1,n):
             features_j = feature_data[j,:]
             pairwise_sim = sim_function(features_i, features_j)
-            print(pairwise_sim)
+            #print(pairwise_sim)
             similarities.append(pairwise_sim)
 
     similarities = np.stack(similarities)
@@ -228,7 +227,7 @@ df_reports.index = pd.to_datetime(df_reports.index)
 df_returns = pd.read_csv("data/stock_returns.csv", index_col="Date")
 df_returns.index = pd.to_datetime(df_returns.index)
 
-'''
+
 
 if os.path.isfile("vectorizer_lda_tuple_25.p"):
     vectorizer, lda = pickle.load(open("vectorizer_lda_tuple_25.p", "rb"))
@@ -236,6 +235,7 @@ else:
     vectorizer, lda = train_model(df_reports)
     pickle.dump((vectorizer, lda), open("vectorizer_lda_tuple_25.p", "wb"))
 
+'''
 train_first = datetime(year=2005, month=12, day=31)
 train_last = datetime(year=2018, month=9, day=30)
 test_first = datetime(year=2018, month=12, day=31)
@@ -339,20 +339,37 @@ pred_y = lr.predict(test_x)
 
 mean_y = np.full(test_y.shape, np.mean(train_y))
 
+'''
 
-
-returns_period = get_returns_for_period(df_returns, datetime(year=2017, month=1, day=1), datetime(year=2018, month=12, day=31))
+returns_sample = get_returns_for_period(df_returns, datetime(year=2018, month=1, day=1), datetime(year=2018, month=12, day=31))
 
 returns_out_of_sample = get_returns_for_period(df_returns, datetime(year=2019, month=1, day=1), datetime(year=2019, month=3, day=31))
 
-columns_both = set(returns_period.columns).intersection(returns_out_of_sample.columns)
-#returns_sample, returns_out_of_sample = df_find_intersection([returns_period, returns_out_of_sample])
+reports_sample = get_reports_for_date(df_reports, datetime(year=2017, month=12, day=31))
 
-returns_sample = returns_period.loc[:,columns_both]
+reports_out_of_sample = get_reports_for_date(df_reports, datetime(year=2018, month=12, day=31))
 
-returns_out_of_sample = returns_out_of_sample.loc[:,columns_both]
+returns_sample, returns_out_of_sample, reports_sample, reports_out_of_sample = find_column_intersection([returns_sample, returns_out_of_sample, reports_sample, reports_out_of_sample])
 
 cov = predict_cov_sample(returns_sample)
+
+reports_features_sample = lda_features(reports_sample, vectorizer, lda)
+
+print(reports_features_sample)
+
+reports_features_out_of_sample = lda_features(reports_out_of_sample, vectorizer, lda)
+
+sim_sample, cov_sample = get_similarities_cov(cov, reports_features_sample, exp_dist)
+
+#print(sim_sample)
+
+lr = LinearRegression()
+
+lr.fit(sim_sample, cov_sample)
+
+#print(lr.coef_)
+
+'''
 
 LW = LedoitWolf()
 
@@ -386,7 +403,7 @@ plt.legend()
 plt.show()
 
 
-'''
+
 
 
 
@@ -399,7 +416,6 @@ get_similarities(arr, arr, exp_dist)
 
 #print(calculate_portfolio_var(w, cov))
 
-'''
 print("----predictions----")
 print("mse: " + str(mean_squared_error(test_y, pred_y)))
 
