@@ -167,15 +167,7 @@ def realized_portfolio_returns(returns, w):
 
     w = np.asarray(w).T
 
-    #print(returns)
-
-    #print(w)
-
-    portfolio_returns = returns *  w
-
-    #print(portfolio_returns)
-
-    #print(portfolio_returns.shape)
+    portfolio_returns = returns * w
 
     whole_portfolio_returns = np.sum(portfolio_returns, axis=1)
 
@@ -185,9 +177,16 @@ def realized_portfolio_returns(returns, w):
 
     sharpe = (return_mean / np.sqrt(return_var)) * np.sqrt(252)
 
+    portfolio_value = [100]
+
+    for r in whole_portfolio_returns:
+
+        portfolio_value.append(portfolio_value[-1] * (1 + r))
+
+
     print(sharpe)
 
-
+    return portfolio_value
 
 
 
@@ -307,7 +306,7 @@ pred_y = lr.predict(test_x)
 
 mean_y = np.full(test_y.shape, np.mean(train_y))
 
-'''
+
 
 returns_period = get_returns_for_period(df_returns, datetime(year=2017, month=1, day=1), datetime(year=2018, month=12, day=31))
 
@@ -338,12 +337,32 @@ w_random = random_weights / random_weights.sum()
 
 w_market_portfolio = np.full(w.shape, 1 / w.shape[0])
 
-realized_portfolio_returns(returns_out_of_sample.values, w_market_portfolio)
+r_market = realized_portfolio_returns(returns_out_of_sample.values, w_market_portfolio)
 realized_portfolio_returns(returns_out_of_sample.values, w_random)
-realized_portfolio_returns(returns_out_of_sample, w_lw)
-realized_portfolio_returns(returns_out_of_sample.values, w)
+r_lw = realized_portfolio_returns(returns_out_of_sample, w_lw)
+r_sample = realized_portfolio_returns(returns_out_of_sample.values, w)
+
+x = range(len(r_market))
+
+plt.plot(x, r_market, label="equal")
+plt.plot(x, r_lw, label="ledoit wolf")
+plt.plot(x, r_sample, label="sample")
+
+plt.legend()
+
+plt.show()
 
 
+'''
+
+def exp_dist(x_1, x_2):
+    dist = x_1 - x_2
+    sim = np.exp(-1 * np.square(dist))
+
+    return sim
+
+arr = np.array([[1,2,3], [4,5,6], [7,8,9]])
+get_similarities(arr, arr, exp_dist)
 
 
 
