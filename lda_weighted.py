@@ -1,8 +1,9 @@
 from sklearn.feature_extraction.text import TfidfVectorizer, CountVectorizer
 from sklearn.decomposition import LatentDirichletAllocation
-from sklearn.metrics.pairwise import cosine_similarity
-from sklearn.linear_model import LinearRegression
+from sklearn.metrics.pairwise import cosine_similarity, pairwise_distances
+from sklearn.linear_model import LinearRegression, ElasticNetCV
 from sklearn.covariance import LedoitWolf
+from sklearn.preprocessing import StandardScaler
 import pandas as pd
 import os
 import pickle
@@ -37,9 +38,14 @@ def get_reports_for_date(df, date):
 
 def lda_features(reports, vectorizer, lda):
 
+    if isinstance(reports, pd.DataFrame):
+        reports = reports.iloc[0]
+
     vector_bow = vectorizer.transform(reports)
 
     vector_lda = lda.transform(vector_bow)
+
+    #print(vector_lda.shape)
 
     return vector_lda
 
@@ -221,6 +227,16 @@ def get_similarities_cov(mat, feature_data, sim_function):
 
     return (similarities, flat_upper)
 
+def predict_covariance_matrix_model(model, scaler, feature_data, mean_var):
+
+    sim_measure = lambda x_1,x_2 : model.predict(scaler.transform(exp_dist(x_1,x_2).reshape(1, -1)))
+
+    matrix = pairwise_distances(feature_data, metric=sim_measure)
+
+    np.fill_diagonal(matrix, mean_var)
+
+    return matrix
+
 
 df_reports = pd.read_csv("data/reports.csv", dtype="string", index_col="date")
 df_reports.index = pd.to_datetime(df_reports.index)
@@ -233,9 +249,9 @@ if os.path.isfile("vectorizer_lda_tuple_25.p"):
     vectorizer, lda = pickle.load(open("vectorizer_lda_tuple_25.p", "rb"))
 else:
     vectorizer, lda = train_model(df_reports)
-    pickle.dump((vectorizer, lda), open("vectorizer_lda_tuple_25.p", "wb"))
+    pickle.dump((vectorizer, lda), open("vectorizer_lda_tuple.p_25", "wb"))
 
-'''
+
 train_first = datetime(year=2005, month=12, day=31)
 train_last = datetime(year=2018, month=9, day=30)
 test_first = datetime(year=2018, month=12, day=31)
@@ -263,33 +279,26 @@ for date in train_range:
     reports = get_reports_for_date(df_reports, date)
     returns = get_returns_for_period(df_returns, date + pd.DateOffset(days=1), returns_stop)
 
-    similarities = compute_cosine_similarity_matrix(reports)
-    cov_matrix = compute_cov_matrix(returns)
+    returns, reports = find_column_intersection([returns, reports])
 
-    similarities, cov = df_find_intersection([similarities, cov_matrix])
+    cov = compute_cov_matrix(returns)
 
-    similarities = similarities.values
+    reports_features = lda_features(reports, vectorizer, lda)
 
-    cov = cov.values
-
-    similarities = similarities[~np.eye(similarities.shape[0], dtype=bool)].reshape(-1,1)
-
-    cov = cov[~np.eye(cov.shape[0], dtype=bool)].reshape(-1,1)
-
-    train_x.append(similarities)
-
-    train_y.append(cov)
-
-    mean_covs.append(cov.mean())
-
-    mean_sims.append(similarities.mean())
+    sim_pairwise, cov_udig = get_similarities_cov(cov, reports_features, exp_dist)
 
 
+    train_x.append(sim_pairwise)
+
+    train_y.append(cov_udig)
+
+    mean_covs.append(cov.diagonal().mean())
 
 
-train_x = np.concatenate(train_x)
-train_y = np.concatenate(train_y)
+train_x = np.stack(train_x)
+train_y = np.stack(train_y)
 
+'''
 test_range = df_reports_test.index
 
 test_x = []
@@ -338,8 +347,9 @@ lr.fit(train_x, train_y)
 pred_y = lr.predict(test_x)
 
 mean_y = np.full(test_y.shape, np.mean(train_y))
-
 '''
+
+
 
 returns_sample = get_returns_for_period(df_returns, datetime(year=2018, month=1, day=1), datetime(year=2018, month=12, day=31))
 
@@ -352,24 +362,37 @@ reports_out_of_sample = get_reports_for_date(df_reports, datetime(year=2018, mon
 returns_sample, returns_out_of_sample, reports_sample, reports_out_of_sample = find_column_intersection([returns_sample, returns_out_of_sample, reports_sample, reports_out_of_sample])
 
 cov = predict_cov_sample(returns_sample)
+cov_random = np.random.random_sample(cov.shape)
 
 reports_features_sample = lda_features(reports_sample, vectorizer, lda)
 
-print(reports_features_sample)
+#print(reports_features_sample)
 
 reports_features_out_of_sample = lda_features(reports_out_of_sample, vectorizer, lda)
 
 sim_sample, cov_sample = get_similarities_cov(cov, reports_features_sample, exp_dist)
 
+scaler = StandardScaler()
+
+sim_sample = scaler.fit_transform(sim_sample)
+
 #print(sim_sample)
 
-lr = LinearRegression()
+#lr = LinearRegression()
+lr = ElasticNetCV()
+
+
 
 lr.fit(sim_sample, cov_sample)
 
-#print(lr.coef_)
+print(lr.intercept_)
+print(lr.coef_)
 
-'''
+sample_mean_var = np.diag(cov).mean()
+
+cov_lda_model = predict_covariance_matrix_model(lr, scaler, reports_features_out_of_sample, sample_mean_var)
+
+
 
 LW = LedoitWolf()
 
@@ -377,44 +400,40 @@ cov_lw = LW.fit(returns_sample).covariance_
 
 #print(cov)
 
-w = optimal_portfolio_weights(cov)
+w_sample = optimal_portfolio_weights(cov)
 
 w_lw = optimal_portfolio_weights(cov_lw)
 
-random_weights = np.random.random_sample(w.shape)
+random_weights = np.random.random_sample(w_sample.shape)
 
-w_random = random_weights / random_weights.sum()
+w_random = optimal_portfolio_weights(cov_random)
 
-w_market_portfolio = np.full(w.shape, 1 / w.shape[0])
+w_market_portfolio = np.full(w_sample.shape, 1 / w_sample.shape[0])
+
+w_model = optimal_portfolio_weights(cov_lda_model)
 
 r_market = realized_portfolio_returns(returns_out_of_sample.values, w_market_portfolio)
-realized_portfolio_returns(returns_out_of_sample.values, w_random)
+r_random = realized_portfolio_returns(returns_out_of_sample.values, w_random)
 r_lw = realized_portfolio_returns(returns_out_of_sample, w_lw)
-r_sample = realized_portfolio_returns(returns_out_of_sample.values, w)
+r_sample = realized_portfolio_returns(returns_out_of_sample.values, w_sample)
+r_model = realized_portfolio_returns(returns_out_of_sample, w_model)
 
 x = range(len(r_market))
 
-plt.plot(x, r_market, label="equal")
+plt.plot(x, r_market, label="market")
+plt.plot(x, r_random, label="random")
 plt.plot(x, r_lw, label="ledoit wolf")
 plt.plot(x, r_sample, label="sample")
+plt.plot(x, r_model, label="lda model")
 
 plt.legend()
 
-plt.show()
+plt.savefig("returns.png")
 
 
 
 
-
-
-arr = np.array([[1,2,3], [4,5,6], [7,8,9]])
-get_similarities(arr, arr, exp_dist)
-
-
-
-
-
-#print(calculate_portfolio_var(w, cov))
+'''
 
 print("----predictions----")
 print("mse: " + str(mean_squared_error(test_y, pred_y)))
