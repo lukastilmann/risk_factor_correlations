@@ -79,7 +79,7 @@ def create_columns(with_duplicates=True):
                         report = pd.NA
 
 
-                    if not pd.isna(report):
+                    if (not pd.isna(report)) and (len(report.split()) > 100):
                         content = report_10k + report
                         reports.append(content)
                         dates.append(quarter_end_date)
@@ -97,9 +97,9 @@ def create_columns(with_duplicates=True):
 
 
     if with_duplicates:
-        df_reports.to_csv("data/reports_with_duplicates.csv", index_label="date")
+        df_reports.to_csv("data/reports_with_duplicates_final.csv", index_label="date")
     else:
-        df_reports.to_csv("data/reports_without_duplicates.csv", index_label="date")
+        df_reports.to_csv("data/reports_without_duplicates_final.csv", index_label="date")
 
 
 
@@ -108,4 +108,4 @@ def create_columns(with_duplicates=True):
     print(df_reports.head())
 
 
-create_columns(False)
+create_columns(True)
