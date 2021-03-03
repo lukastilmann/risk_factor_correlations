@@ -1,4 +1,5 @@
 import pandas as pd
+import chardet
 
 file = "data/companies.csv"
 
@@ -13,6 +14,20 @@ def consolidate_reports(df):
             new_content += row["content"]
         new_df = pd.DataFrame({"content": [new_content]}, index=df.iloc[0].index)
         return new_df
+
+def clean_encoding(text):
+    as_bytes = bytes(text, encoding="raw_unicode_escape")
+
+    enc = chardet.detect(as_bytes)["encoding"]
+
+    if enc and not 'cp949':
+        decoded = as_bytes.decode(enc).replace("\\u2019", "'")
+    else:
+        decoded = as_bytes.decode("cp1252").replace("\\u2019", "'")
+
+
+
+    return decoded
 
 def create_columns(with_duplicates=True):
     companies = df_companies.loc[:,["company", "ticker"]].dropna().drop_duplicates()
@@ -57,6 +72,7 @@ def create_columns(with_duplicates=True):
                 report_10k = pd.NA
 
             if not pd.isna(report_10k):
+                report_10k = clean_encoding(report_10k)
                 reports.append(report_10k)
                 dates.append(quarter_end_date)
 
@@ -80,6 +96,7 @@ def create_columns(with_duplicates=True):
 
 
                     if (not pd.isna(report)) and (len(report.split()) > 100):
+                        report = clean_encoding(report)
                         content = report_10k + report
                         reports.append(content)
                         dates.append(quarter_end_date)
@@ -104,8 +121,7 @@ def create_columns(with_duplicates=True):
 
 
 
-
     print(df_reports.head())
 
 
-create_columns(True)
+create_columns(False)
