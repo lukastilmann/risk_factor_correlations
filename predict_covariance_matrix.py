@@ -59,8 +59,6 @@ def tfidf_features(reports, vectorizer):
     if isinstance(reports, pd.DataFrame):
         reports = reports.iloc[0]
 
-    #reports_np = reports.values.flatten()
-
     return vectorizer.transform(reports)
 
 
@@ -107,42 +105,6 @@ def predict_cov_sample(prev_sample):
     return compute_cov_matrix(prev_sample).values
 
 
-def predict_cov_cos_similarity(prev_sample, prev_similarities, similarities):
-
-    prev_sample = prev_sample.values
-    prev_sample_wout_diag = prev_sample[~np.eye(prev_sample.shape[0], dtype=bool)].reshape(prev_sample.shape[0], -1)
-
-    similarities = similarities.values
-    similarities_wout_diag = similarities[~np.eye(similarities.shape[0], dtype=bool)].reshape(similarities.shape[0], -1)
-
-    prev_similarities = prev_similarities.values
-    prev_similarities_wout_diag = prev_similarities[~np.eye(prev_similarities.shape[0], dtype=bool)].reshape(prev_similarities.shape[0], -1)
-
-
-    shape = similarities.shape
-    prev_similarities_wout_diag = prev_similarities_wout_diag.flatten().reshape(-1,1)
-    prev_sample_wout_diag = prev_sample_wout_diag.flatten().reshape(-1,1)
-    similarities = similarities.flatten().reshape(-1,1)
-    mean_sim = np.mean(prev_similarities_wout_diag)
-    sim_prev_demeaned = prev_similarities_wout_diag - mean_sim
-    similarities_demeaned = similarities - mean_sim
-
-    lr = LinearRegression()
-    lr.fit(sim_prev_demeaned, prev_sample_wout_diag)
-
-    pred = lr.predict(similarities_demeaned)
-
-    pred = pred.reshape(shape)
-
-    diag_prev = prev_sample.diagonal()
-
-    pred[np.diag_indices_from(pred)] = diag_prev
-
-    print(lr.intercept_)
-    print(lr.coef_)
-
-    return pred
-
 def predict_mean(prev_sample):
 
     cov_mat = prev_sample.values
@@ -157,12 +119,11 @@ def predict_mean(prev_sample):
 def eval_predictions(true, pred):
     return (np.square(true - pred)).mean(axis=None)
 
+
 def calculate_portfolio_var(w, sigma):
 
     w = np.asmatrix(w)
     sigma = np.asmatrix(sigma)
-
-    #print((w.T * sigma) * w)
 
     return(w.transpose()*sigma*w)
 
@@ -171,44 +132,24 @@ def optimal_portfolio_weights(sigma):
 
     size = sigma.shape[0]
     sigma = np.asmatrix(sigma)
-    #cons = ({'type': 'eq', 'fun': lambda x:  np.sum(x)-1.0})
-    #start_weights = np.full((size, 1), 1 / size)
-
     one = np.ones((size, 1))
     one = np.asmatrix(one)
-
     w_star = (np.linalg.inv(sigma) * one) / (one.T * np.linalg.inv(sigma) * one)
-
-    #print(np.sum(w_star))
 
     return  w_star
 
 def realized_portfolio_returns(returns, w):
 
     w = np.asarray(w).T
-
-    #print(returns)
-
-    #print(w)
-
     portfolio_returns = returns *  w
-
-    #print(portfolio_returns)
-
-    #print(portfolio_returns.shape)
-
     whole_portfolio_returns = np.sum(portfolio_returns, axis=1)
 
     return_mean = whole_portfolio_returns.mean()
-
     return_var = whole_portfolio_returns.var()
-
     sharpe = (return_mean / np.sqrt(return_var)) * np.sqrt(252)
 
     portfolio_value = [100]
-
     for r in whole_portfolio_returns:
-
         portfolio_value.append(portfolio_value[-1] * (1 + r))
 
     print("sharpe ratio: " + str(sharpe))
@@ -266,17 +207,6 @@ def predict_covariance_matrix_model(model, scaler, feature_data, mean_var, mean_
     return matrix
 
 
-def print_mean_variance(cov):
-
-    cov = cov.flatten()
-
-    print("---------")
-
-    print(cov.mean())
-
-    print(cov.var())
-
-
 #loading data
 df_reports = pd.read_csv("data/reports_with_duplicates_final.csv", dtype="string", index_col="date")
 df_reports.index = pd.to_datetime(df_reports.index)
@@ -296,10 +226,7 @@ else:
     vectorizer = train_tfidf_model(df_reports, train_last)
     pickle.dump(vectorizer, open("vectorizer.p", "wb"))
 
-
-
-
-#df_reports_test = df_reports.loc[test_first:test_last]
+#loading reports for training set
 df_reports_train = df_reports.loc[train_first:train_last]
 train_range = df_reports_train.index
 
