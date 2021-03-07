@@ -9,7 +9,7 @@ import os
 import pickle
 import numpy as np
 from datetime import datetime, timedelta
-from pandas.tseries.offsets import BQuarterBegin, BQuarterEnd
+from pandas.tseries.offsets import BQuarterBegin, BQuarterEnd, QuarterBegin, QuarterEnd, DateOffset
 from pandas import Timedelta
 from sklearn.metrics import mean_squared_error, r2_score
 from scipy.optimize import minimize
@@ -87,14 +87,11 @@ def find_column_intersection(list_dfs):
     list_columns = []
 
     for df in list_dfs:
-        #print(df.columns)
         list_columns.append(set(df.columns))
 
     in_all = set.intersection(*list_columns)
 
     list_dfs_new = []
-
-    #print(in_all)
 
     for df in list_dfs:
         list_dfs_new.append(df[in_all])
@@ -140,25 +137,25 @@ def optimal_portfolio_weights(sigma):
 
     return  w_star
 
-def realized_portfolio_returns(returns, w):
+def realized_portfolio_returns(returns, w_mat, returns_previous):
 
-    w = np.asarray(w).T
-    portfolio_returns = returns *  w
+    w = np.asarray(w_mat).T
+    portfolio_returns = returns * w
     whole_portfolio_returns = np.sum(portfolio_returns, axis=1)
 
     return_mean = whole_portfolio_returns.mean()
     return_var = whole_portfolio_returns.var()
     sharpe = (return_mean / np.sqrt(return_var)) * np.sqrt(252)
 
-    portfolio_value = [100]
+    portfolio_returns = returns_previous
     for r in whole_portfolio_returns:
-        portfolio_value.append(portfolio_value[-1] * (1 + r))
+        portfolio_returns.append(portfolio_returns[-1] * (1 + r))
 
     print("sharpe ratio: " + str(sharpe))
     print("r var: " + str(return_var))
     print("-----")
 
-    return portfolio_value
+    return portfolio_returns
 
 def exp_dist(x_1, x_2):
     dist = np.absolute(x_1 - x_2)
@@ -275,18 +272,24 @@ train_y = np.concatenate(train_y, axis=0)
 #
 # TODO: incorporation of different time horizons and multiple test intervals
 #
-
+#the following is to test to trained model
 total_quarters = 8
 
-test_intervals = total_quarters / time_horizon_quarters
+test_intervals = int(total_quarters / time_horizon_quarters)
+
+r_equal = [100]
+r_sample = [100]
+r_lw = [100]
+r_model = [100]
+r_combined = [100]
 
 for i in range(test_intervals):
 
-    sample_start = datetime(year=2018, month=1, day=1) + BQuarterBegin(startingMonth=1, n=i * time_horizon_quarters)
-    sample_stop = sample_start + Timedelta(days=364)
+    sample_start = datetime(year=2018, month=1, day=1) + QuarterBegin(startingMonth=1, n=i * time_horizon_quarters)
+    sample_stop = sample_start + DateOffset(years=1) - DateOffset(days=1)
 
-    out_of_sample_start = sample_stop + Timedelta(days=1)
-    out_of_sample_stop = out_of_sample_start + BQuarterEnd(startingMonth=3, n=time_horizon_quarters)
+    out_of_sample_start = sample_stop + DateOffset(days=1)
+    out_of_sample_stop = out_of_sample_start + QuarterEnd(startingMonth=3, n=time_horizon_quarters)
 
     # creating the reports and returns for the test. Includes sample (previous time frame used for empirical estimation) and the test set
     returns_sample = get_returns_for_period(df_returns, sample_start, sample_stop)
@@ -294,6 +297,9 @@ for i in range(test_intervals):
 
     reports_sample = get_reports_for_date(df_reports, sample_start - Timedelta(days=1))
     reports_out_of_sample = get_reports_for_date(df_reports, out_of_sample_start - Timedelta(days=1))
+
+    print("-----------------new test period-----------------")
+    print("reports for: " + str(out_of_sample_start - Timedelta(days=1)))
 
     returns_sample, returns_out_of_sample, reports_sample, reports_out_of_sample = find_column_intersection(
         [returns_sample, returns_out_of_sample, reports_sample, reports_out_of_sample])
@@ -313,85 +319,83 @@ for i in range(test_intervals):
     # mean variance in the sample, as model doesn't predict variance
     sample_mean_var = np.mean(mean_covs)
 
+    #
+    # TODO: should incorporate different time horizons
+    #
 
+    # feature engineer for the time frame to predict
+    reports_features_out_of_sample = tfidf_features(reports_out_of_sample, vectorizer)
 
+    # different covariance matrix predictions
+    cov_sample = predict_cov_sample(returns_sample)
 
+    cov_upper = cov[np.triu_indices(cov.shape[0], k=1)]
+    sample_mean_cov = cov_upper.mean()
+    cov_model = predict_covariance_matrix_model(lr, scaler, reports_features_out_of_sample, sample_mean_var,
+                                                sample_mean_cov)
 
+    cov_equal = np.full(cov_sample.shape, sample_mean_cov)
+    np.fill_diagonal(cov_equal, sample_mean_var)
 
+    LW = LedoitWolf()
+    cov_lw = LW.fit(returns_sample).covariance_
 
-#
-# TODO: should incorporate different time horizons
-#
+    cov_combined = (cov_model + cov_lw) / 2
 
-#feature engineer for the time frame to predict
-reports_features_out_of_sample = tfidf_features(reports_out_of_sample, vectorizer)
+    # empirical variance for the out of sample time frame
+    cov_true = compute_cov_matrix(returns_out_of_sample)
 
-#different covariance matrix predictions
-cov_sample = predict_cov_sample(returns_sample)
+    # evaluation of the predictions
+    print("--------eval-------- ")
 
-cov_upper = cov[np.triu_indices(cov.shape[0], k=1)]
-sample_mean_cov = cov_upper.mean()
-cov_model = predict_covariance_matrix_model(lr, scaler, reports_features_out_of_sample, sample_mean_var, sample_mean_cov)
+    print("frobenius norm for cov equal")
+    print(np.linalg.norm(cov_true - cov_equal, ord="fro"))
 
-cov_equal = np.full(cov_sample.shape, sample_mean_cov)
-np.fill_diagonal(cov_equal, sample_mean_var)
+    print("frobenius norm for sample cov")
+    print(np.linalg.norm(cov_true - cov_sample, ord="fro"))
 
-LW = LedoitWolf()
-cov_lw = LW.fit(returns_sample).covariance_
+    print("frobenius norm for ledoit wolf estimator")
+    print(np.linalg.norm(cov_true - cov_lw, ord="fro"))
 
-cov_combined = (cov_model +cov_lw) / 2
+    print("frobenius norm using nlu model on risk reports")
+    print(np.linalg.norm(cov_true - cov_model, ord="fro"))
 
-#empirical variance for the out of sample time frame
-cov_true = compute_cov_matrix(returns_out_of_sample)
+    print("frobenius norm of combined estimates of lw and model")
+    print(np.linalg.norm(cov_true - cov_combined, ord="fro"))
 
+    # constructing portfolios based on predictions
+    w_equal = optimal_portfolio_weights(cov_equal)
+    w_sample = optimal_portfolio_weights(cov_sample)
+    w_lw = optimal_portfolio_weights(cov_lw)
+    w_model = optimal_portfolio_weights(cov_model)
+    w_combined = optimal_portfolio_weights(cov_combined)
 
-#evaluation of the predictions
-print("--------eval-------- ")
+    # calculating realized returns based on these portfolios
+    print("-----compute returns----")
 
-print("frobenius norm for cov equal")
-print(np.linalg.norm(cov_true - cov_equal, ord="fro"))
+    print("equal cov portfolio")
+    rs_equal = realized_portfolio_returns(returns_out_of_sample.values, w_equal, r_equal)
+    print("sample cov portfolio")
+    r_sample = realized_portfolio_returns(returns_out_of_sample.values, w_sample, r_sample)
+    print("ledoit wolf cov portfolio")
+    r_lw = realized_portfolio_returns(returns_out_of_sample.values, w_lw, r_lw)
+    print("model cov portfolio")
+    r_model = realized_portfolio_returns(returns_out_of_sample.values, w_model, r_model)
+    print("combined cov portfolio")
+    r_combined = realized_portfolio_returns(returns_out_of_sample.values, w_combined, r_combined)
 
-print("frobenius norm for sample cov")
-print(np.linalg.norm(cov_true - cov_sample, ord="fro"))
-
-print("frobenius norm for ledoit wolf estimator")
-print(np.linalg.norm(cov_true - cov_lw, ord="fro"))
-
-print("frobenius norm using nlu model on risk reports")
-print(np.linalg.norm(cov_true - cov_model, ord="fro"))
-
-print("frobenius norm of combined estimates of lw and model")
-print(np.linalg.norm(cov_true - cov_combined, ord="fro"))
-
-#constructing portfolios based on predictions
-w_equal = optimal_portfolio_weights(cov_equal)
-w_sample = optimal_portfolio_weights(cov_sample)
-w_lw = optimal_portfolio_weights(cov_lw)
-w_model = optimal_portfolio_weights(cov_model)
-w_combined = optimal_portfolio_weights(cov_combined)
-
-#calculating realized returns based on these portfolios
-print("-----compute returns----")
-
-print("equal cov portfolio")
-r_equal = realized_portfolio_returns(returns_out_of_sample.values, w_equal)
-print("sample cov portfolio")
-r_sample = realized_portfolio_returns(returns_out_of_sample.values, w_sample)
-print("ledoit wolf cov portfolio")
-r_lw = realized_portfolio_returns(returns_out_of_sample.values, w_lw)
-print("model cov portfolio")
-r_model = realized_portfolio_returns(returns_out_of_sample.values, w_model)
-print("combined cov portfolio")
-r_combined = realized_portfolio_returns(returns_out_of_sample.values, w_combined)
 
 #plotting the returns
 x = range(len(r_equal))
 plt.plot(x, r_equal, label="market")
-plt.plot(x, r_sample, label="sample")
-plt.plot(x, r_lw, label="ledoit wolf")
-plt.plot(x, r_model, label="lda model")
+#plt.plot(x, r_sample, label="sample")
+#plt.plot(x, r_lw, label="ledoit wolf")
+#plt.plot(x, r_model, label="lda model")
 plt.plot(x, r_combined, label="combined")
 
 plt.legend()
 
 plt.show()
+
+print("coefficients of regression model")
+print(lr.coef_)
