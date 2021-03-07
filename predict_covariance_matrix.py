@@ -8,7 +8,9 @@ import pandas as pd
 import os
 import pickle
 import numpy as np
-from datetime import datetime
+from datetime import datetime, timedelta
+from pandas.tseries.offsets import BQuarterBegin, BQuarterEnd
+from pandas import Timedelta
 from sklearn.metrics import mean_squared_error, r2_score
 from scipy.optimize import minimize
 import matplotlib.pyplot as plt
@@ -206,6 +208,8 @@ def predict_covariance_matrix_model(model, scaler, feature_data, mean_var, mean_
 
     return matrix
 
+#parameters:
+time_horizon_quarters = 1
 
 #loading data
 df_reports = pd.read_csv("data/reports_with_duplicates_final.csv", dtype="string", index_col="date")
@@ -242,7 +246,7 @@ for date in train_range:
     #if datetime(year=2008, month=6, day=30) <= date <= datetime(year=2009, month=3, day=31):
     #    continue
     #returns_stop = date + pd.tseries.offsets.QuarterEnd()
-    returns_stop = date + pd.Timedelta(weeks=52)
+    returns_stop = date + Timedelta(weeks=52)
 
     reports = get_reports_for_date(df_reports, date)
     returns = get_returns_for_period(df_returns, date + pd.DateOffset(days=1), returns_stop)
@@ -272,30 +276,47 @@ train_y = np.concatenate(train_y, axis=0)
 # TODO: incorporation of different time horizons and multiple test intervals
 #
 
-#creating the reports and returns for the test. Includes sample (previous time frame used for empirical estimation) and the test set
-returns_sample = get_returns_for_period(df_returns, datetime(year=2018, month=1, day=1), datetime(year=2018, month=12, day=31))
-returns_out_of_sample = get_returns_for_period(df_returns, datetime(year=2019, month=1, day=1), datetime(year=2019, month=3, day=31))
+total_quarters = 8
 
-reports_sample = get_reports_for_date(df_reports, datetime(year=2017, month=12, day=31))
-reports_out_of_sample = get_reports_for_date(df_reports, datetime(year=2018, month=12, day=31))
+test_intervals = total_quarters / time_horizon_quarters
 
-returns_sample, returns_out_of_sample, reports_sample, reports_out_of_sample = find_column_intersection([returns_sample, returns_out_of_sample, reports_sample, reports_out_of_sample])
+for i in range(test_intervals):
+
+    sample_start = datetime(year=2018, month=1, day=1) + BQuarterBegin(startingMonth=1, n=i * time_horizon_quarters)
+    sample_stop = sample_start + Timedelta(days=364)
+
+    out_of_sample_start = sample_stop + Timedelta(days=1)
+    out_of_sample_stop = out_of_sample_start + BQuarterEnd(startingMonth=3, n=time_horizon_quarters)
+
+    # creating the reports and returns for the test. Includes sample (previous time frame used for empirical estimation) and the test set
+    returns_sample = get_returns_for_period(df_returns, sample_start, sample_stop)
+    returns_out_of_sample = get_returns_for_period(df_returns, out_of_sample_start, out_of_sample_stop)
+
+    reports_sample = get_reports_for_date(df_reports, sample_start - Timedelta(days=1))
+    reports_out_of_sample = get_reports_for_date(df_reports, out_of_sample_start - Timedelta(days=1))
+
+    returns_sample, returns_out_of_sample, reports_sample, reports_out_of_sample = find_column_intersection(
+        [returns_sample, returns_out_of_sample, reports_sample, reports_out_of_sample])
+
+    #
+    # TODO: needs to be varied for feature wise similarities
+    #
+    # standardizing the data
+    scaler = StandardScaler()
+    train_x = train_x.reshape(-1, 1)
+    train_x = scaler.fit_transform(train_x)
+
+    # regression model for prediction
+    lr = LinearRegression(fit_intercept=False)
+    lr.fit(train_x, train_y)
+
+    # mean variance in the sample, as model doesn't predict variance
+    sample_mean_var = np.mean(mean_covs)
 
 
-#
-# TODO: needs to be varied for feature wise similarities
-#
-#standardizing the data
-scaler = StandardScaler()
-train_x = train_x.reshape(-1,1)
-train_x = scaler.fit_transform(train_x)
 
-#regression model for prediction
-lr = LinearRegression(fit_intercept=False)
-lr.fit(train_x, train_y)
 
-#mean variance in the sample, as model doesn't predict variance
-sample_mean_var = np.mean(mean_covs)
+
 
 
 #
