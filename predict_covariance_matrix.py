@@ -18,6 +18,12 @@ def train_tfidf_model(df, train_last, idf=True):
     corpus = df.loc[:train_last].values.flatten()
     notna_corpus = corpus[~pd.isnull(corpus)]
     vectorizer = TfidfVectorizer(stop_words="english", strip_accents="unicode", min_df=10, use_idf=idf)
+
+    if idf:
+        print("training tfidf model.")
+    else:
+        print("training tf model")
+
     vectorizer = vectorizer.fit(notna_corpus)
 
     return vectorizer
@@ -220,7 +226,8 @@ def predict_covariance_matrix_model(model, scaler, feature_data, mean_var, mean_
 
 # parameters:
 time_horizon_quarters = 1
-model = "lda"
+model = "tfidf"
+idf = False
 feature_wise = False
 n_dims = 5
 
@@ -235,12 +242,18 @@ train_first = datetime(year=2005, month=12, day=31)
 train_last = datetime(year=2018, month=9, day=30)
 
 if model == "tfidf":
-    # checking if model has been saved
-    if os.path.isfile("vectorizer.p"):
-        vectorizer = pickle.load(open("vectorizer.p", "rb"))
+    # string with pickle name for saved model
+    if idf:
+        weighting = "tfidf"
     else:
-        vectorizer = train_tfidf_model(df_reports, train_last)
-        pickle.dump(vectorizer, open("vectorizer.p", "wb"))
+        weighting = "tf"
+    pickle_name = "vectorizer_{}.p".format(weighting)
+    # checking if model has been saved
+    if os.path.isfile(pickle_name):
+        vectorizer = pickle.load(open(pickle_name, "rb"))
+    else:
+        vectorizer = train_tfidf_model(df_reports, train_last, idf)
+        pickle.dump(vectorizer, open(pickle_name, "wb"))
 
 if model in ["svd", "lda"]:
     # string with name for pickle to save model to
