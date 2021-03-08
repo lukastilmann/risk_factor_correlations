@@ -1,5 +1,5 @@
 from sklearn.feature_extraction.text import TfidfVectorizer, CountVectorizer
-from sklearn.decomposition import LatentDirichletAllocation
+from sklearn.decomposition import LatentDirichletAllocation, TruncatedSVD
 from sklearn.metrics.pairwise import cosine_similarity, pairwise_distances
 from sklearn.linear_model import LinearRegression, ElasticNetCV, RidgeCV
 from sklearn.covariance import LedoitWolf
@@ -38,6 +38,21 @@ def train_lda_model(df, train_last):
 
     return vectorizer, lda
 
+def train_svd_model(df, train_last):
+    corpus = df.loc[:train_last].values.flatten()
+    notna_corpus = corpus[~pd.isnull(corpus)]
+    vectorizer = CountVectorizer(stop_words="english", min_df=10)
+    bow_vector = vectorizer.fit_transform(notna_corpus)
+
+    print("training svd model")
+    svd = TruncatedSVD(n_components=25, random_state=0)
+
+    svd.fit(bow_vector)
+
+    print("finished training svd model")
+
+    return vectorizer, svd
+
 def get_reports_for_date(df, date):
 
     df_date = df.loc[date:date]
@@ -45,16 +60,16 @@ def get_reports_for_date(df, date):
 
     return df_date
 
-def lda_features(reports, vectorizer, lda):
+def topic_model_features(reports, vectorizer, model):
 
     if isinstance(reports, pd.DataFrame):
         reports = reports.iloc[0]
 
     vector_bow = vectorizer.transform(reports)
 
-    vector_lda = lda.transform(vector_bow)
+    vector_topics = model.transform(vector_bow)
 
-    return vector_lda
+    return vector_topics
 
 def tfidf_features(reports, vectorizer):
 
@@ -207,6 +222,7 @@ def predict_covariance_matrix_model(model, scaler, feature_data, mean_var, mean_
 
 #parameters:
 time_horizon_quarters = 1
+model = "svd"
 
 #loading data
 df_reports = pd.read_csv("data/reports_with_duplicates_final.csv", dtype="string", index_col="date")
@@ -219,13 +235,21 @@ df_returns.index = pd.to_datetime(df_returns.index)
 train_first = datetime(year=2005, month=12, day=31)
 train_last = datetime(year=2018, month=9, day=30)
 
+if model =="tfidf":
+    #checking if model has been saved
+    if os.path.isfile("vectorizer.p"):
+        vectorizer = pickle.load(open("vectorizer.p", "rb"))
+    else:
+        vectorizer = train_tfidf_model(df_reports, train_last)
+        pickle.dump(vectorizer, open("vectorizer.p", "wb"))
 
-#checking if model has been saved
-if os.path.isfile("vectorizer.p"):
-    vectorizer = pickle.load(open("vectorizer.p", "rb"))
-else:
-    vectorizer = train_tfidf_model(df_reports, train_last)
-    pickle.dump(vectorizer, open("vectorizer.p", "wb"))
+if model =="svd":
+    if os.path.isfile("vectorizer_svd_tuple_25.p"):
+        vectorizer, svd = pickle.load(open("vectorizer_svd_tuple_25.p", "rb"))
+    else:
+        vectorizer, svd = train_svd_model(df_reports, train_last)
+        pickle.dump((vectorizer, svd), open("vectorizer_svd_tuple_25.p", "wb"))
+
 
 #loading reports for training set
 df_reports_train = df_reports.loc[train_first:train_last]
@@ -255,7 +279,11 @@ for date in train_range:
     #
     # TODO support for different feature types
     #
-    reports_features = tfidf_features(reports, vectorizer)
+    if model == "tfidf":
+        reports_features = tfidf_features(reports, vectorizer)
+    if model == "svd":
+        reports_features = topic_model_features(reports, vectorizer, svd)
+
     sim_pairwise, cov_upper_dig = get_similarities_cov(cov, reports_features, cosine_similarity, feature_wise=False)
 
     train_x.append(sim_pairwise)
@@ -269,9 +297,6 @@ train_x = np.concatenate(train_x, axis=0)
 train_y = np.concatenate(train_y, axis=0)
 
 
-#
-# TODO: incorporation of different time horizons and multiple test intervals
-#
 #the following is to test to trained model
 total_quarters = 8
 
@@ -320,11 +345,15 @@ for i in range(test_intervals):
     sample_mean_var = np.mean(mean_covs)
 
     #
-    # TODO: should incorporate different time horizons
+    # TODO: should incorporate different feature types
     #
 
     # feature engineer for the time frame to predict
-    reports_features_out_of_sample = tfidf_features(reports_out_of_sample, vectorizer)
+    if model == "tfidf":
+        reports_features_out_of_sample = tfidf_features(reports_out_of_sample, vectorizer)
+    if model == "svd":
+        reports_features_out_of_sample = topic_model_features(reports_out_of_sample, vectorizer, svd)
+
 
     # different covariance matrix predictions
     cov_sample = predict_cov_sample(returns_sample)
