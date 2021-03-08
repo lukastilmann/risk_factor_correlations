@@ -227,8 +227,8 @@ def predict_covariance_matrix_model(model, scaler, feature_data, mean_var, mean_
 
 #parameters:
 time_horizon_quarters = 1
-model = "svd"
-feature_wise = True
+model = "lda"
+feature_wise = False
 
 #loading data
 df_reports = pd.read_csv("data/reports_with_duplicates_final.csv", dtype="string", index_col="date")
@@ -251,10 +251,17 @@ if model =="tfidf":
 
 if model =="svd":
     if os.path.isfile("vectorizer_svd_tuple_25.p"):
-        vectorizer, svd = pickle.load(open("vectorizer_svd_tuple_25.p", "rb"))
+        vectorizer, topic_model = pickle.load(open("vectorizer_svd_tuple_25.p", "rb"))
     else:
-        vectorizer, svd = train_svd_model(df_reports, train_last)
-        pickle.dump((vectorizer, svd), open("vectorizer_svd_tuple_25.p", "wb"))
+        vectorizer, topic_model = train_svd_model(df_reports, train_last)
+        pickle.dump((vectorizer, topic_model), open("vectorizer_svd_tuple_25.p", "wb"))
+
+if model == "lda":
+    if os.path.isfile("vectorizer_lda_tuple_25.p"):
+        vectorizer, topic_model = pickle.load(open("vectorizer_lda_tuple_25.p", "rb"))
+    else:
+        vectorizer, topic_model = train_lda_model(df_reports, train_last)
+        pickle.dump((vectorizer, topic_model), open("vectorizer_lda_tuple_25.p", "wb"))
 
 
 #loading reports for training set
@@ -282,13 +289,10 @@ for date in train_range:
 
     cov = predict_cov_sample(returns)
 
-    #
-    # TODO support for different feature types
-    #
     if model == "tfidf":
         reports_features = tfidf_features(reports, vectorizer)
-    if model == "svd":
-        reports_features = topic_model_features(reports, vectorizer, svd)
+    if model in ["svd", "lda"]:
+        reports_features = topic_model_features(reports, vectorizer, topic_model)
 
     if feature_wise:
         sim, cov_upper_dig = get_similarities_cov(cov, reports_features, exp_dist, True)
@@ -304,6 +308,19 @@ for date in train_range:
 #creating the training data
 train_x = np.concatenate(train_x, axis=0)
 train_y = np.concatenate(train_y, axis=0)
+
+# standardizing the data
+scaler = StandardScaler()
+if not feature_wise:
+    train_x = train_x.reshape(-1, 1)
+train_x = scaler.fit_transform(train_x)
+
+# regression model for prediction
+lr = LinearRegression(fit_intercept=False)
+lr.fit(train_x, train_y)
+
+# mean variance in the sample, as model doesn't predict variance
+sample_mean_var = np.mean(mean_covs)
 
 
 #the following is to test to trained model
@@ -338,32 +355,11 @@ for i in range(test_intervals):
     returns_sample, returns_out_of_sample, reports_sample, reports_out_of_sample = find_column_intersection(
         [returns_sample, returns_out_of_sample, reports_sample, reports_out_of_sample])
 
-    #
-    # TODO: needs to be varied for feature wise similarities
-    #
-    # standardizing the data
-    scaler = StandardScaler()
-    if not feature_wise:
-        train_x = train_x.reshape(-1, 1)
-    train_x = scaler.fit_transform(train_x)
-
-    # regression model for prediction
-    lr = LinearRegression(fit_intercept=False)
-    lr.fit(train_x, train_y)
-
-    # mean variance in the sample, as model doesn't predict variance
-    sample_mean_var = np.mean(mean_covs)
-
-    #
-    # TODO: should incorporate different feature types
-    #
-
     # feature engineer for the time frame to predict
     if model == "tfidf":
         reports_features_out_of_sample = tfidf_features(reports_out_of_sample, vectorizer)
-    if model == "svd":
-        reports_features_out_of_sample = topic_model_features(reports_out_of_sample, vectorizer, svd)
-
+    if model in ["svd", "lda"]:
+        reports_features_out_of_sample = topic_model_features(reports_out_of_sample, vectorizer, topic_model)
 
     # different covariance matrix predictions
     cov_sample = predict_cov_sample(returns_sample)
