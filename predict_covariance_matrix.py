@@ -152,6 +152,7 @@ def optimal_portfolio_weights(sigma):
 
     return  w_star
 
+
 def realized_portfolio_returns(returns, w_mat, returns_previous):
 
     w = np.asarray(w_mat).T
@@ -206,13 +207,16 @@ def get_similarities_cov(mat, feature_data, sim_function, feature_wise):
 
     return similarities, cov_demean
 
-def predict_covariance_matrix_model(model, scaler, feature_data, mean_var, mean_cov):
+
+def predict_covariance_matrix_model(model, scaler, feature_data, mean_var, mean_cov, feature_wise):
 
     #for feature wise:
-    #sim_measure = lambda x_1, x_2: model.predict(scaler.transform(exp_dist(x_1, x_2).reshape(1, -1)))
+    if feature_wise:
+        sim_measure = lambda x_1, x_2: model.predict(scaler.transform(exp_dist(x_1, x_2).reshape(1, -1)))
 
     #for pairwise
-    sim_measure = lambda x_1,x_2 : model.predict(scaler.transform(cosine_similarity(x_1.reshape(1,-1),x_2.reshape(1,-1))))
+    else:
+        sim_measure = lambda x_1,x_2 : model.predict(scaler.transform(cosine_similarity(x_1.reshape(1,-1),x_2.reshape(1,-1))))
 
     matrix = pairwise_distances(feature_data, metric=sim_measure)
     matrix = matrix + mean_cov
@@ -220,9 +224,11 @@ def predict_covariance_matrix_model(model, scaler, feature_data, mean_var, mean_
 
     return matrix
 
+
 #parameters:
 time_horizon_quarters = 1
 model = "svd"
+feature_wise = True
 
 #loading data
 df_reports = pd.read_csv("data/reports_with_duplicates_final.csv", dtype="string", index_col="date")
@@ -284,9 +290,12 @@ for date in train_range:
     if model == "svd":
         reports_features = topic_model_features(reports, vectorizer, svd)
 
-    sim_pairwise, cov_upper_dig = get_similarities_cov(cov, reports_features, cosine_similarity, feature_wise=False)
+    if feature_wise:
+        sim, cov_upper_dig = get_similarities_cov(cov, reports_features, exp_dist, True)
+    else:
+        sim, cov_upper_dig = get_similarities_cov(cov, reports_features, cosine_similarity, feature_wise=False)
 
-    train_x.append(sim_pairwise)
+    train_x.append(sim)
     train_y.append(cov_upper_dig)
     mean_covs.append(cov.diagonal().mean())
 
@@ -334,7 +343,8 @@ for i in range(test_intervals):
     #
     # standardizing the data
     scaler = StandardScaler()
-    train_x = train_x.reshape(-1, 1)
+    if not feature_wise:
+        train_x = train_x.reshape(-1, 1)
     train_x = scaler.fit_transform(train_x)
 
     # regression model for prediction
@@ -361,7 +371,7 @@ for i in range(test_intervals):
     cov_upper = cov[np.triu_indices(cov.shape[0], k=1)]
     sample_mean_cov = cov_upper.mean()
     cov_model = predict_covariance_matrix_model(lr, scaler, reports_features_out_of_sample, sample_mean_var,
-                                                sample_mean_cov)
+                                                sample_mean_cov, feature_wise)
 
     cov_equal = np.full(cov_sample.shape, sample_mean_cov)
     np.fill_diagonal(cov_equal, sample_mean_var)
