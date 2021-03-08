@@ -8,12 +8,11 @@ import pandas as pd
 import os
 import pickle
 import numpy as np
-from datetime import datetime, timedelta
-from pandas.tseries.offsets import BQuarterBegin, BQuarterEnd, QuarterBegin, QuarterEnd, DateOffset
+from datetime import datetime
+from pandas.tseries.offsets import QuarterBegin, QuarterEnd, DateOffset
 from pandas import Timedelta
-from sklearn.metrics import mean_squared_error, r2_score
-from scipy.optimize import minimize
 import matplotlib.pyplot as plt
+
 
 def train_tfidf_model(df, train_last, idf=True):
     corpus = df.loc[:train_last].values.flatten()
@@ -23,45 +22,47 @@ def train_tfidf_model(df, train_last, idf=True):
 
     return vectorizer
 
-def train_lda_model(df, train_last):
+
+def train_lda_model(df, train_last, n_dims):
     corpus = df.loc[:train_last].values.flatten()
     notna_corpus = corpus[~pd.isnull(corpus)]
     vectorizer = CountVectorizer(stop_words="english", min_df=10)
     bow_vector = vectorizer.fit_transform(notna_corpus)
 
-    print("training lda model")
-    lda = LatentDirichletAllocation(n_components=25, random_state=0)
+    print("training lda model with {} dimensions.".format(str(n_dims)))
+    lda = LatentDirichletAllocation(n_components=n_dims, random_state=0)
 
     lda.fit(bow_vector)
 
-    print("finished training lda model")
+    print("finished training lda model.")
 
     return vectorizer, lda
 
-def train_svd_model(df, train_last):
+
+def train_svd_model(df, train_last, n_dims):
     corpus = df.loc[:train_last].values.flatten()
     notna_corpus = corpus[~pd.isnull(corpus)]
     vectorizer = CountVectorizer(stop_words="english", min_df=10)
     bow_vector = vectorizer.fit_transform(notna_corpus)
 
-    print("training svd model")
-    svd = TruncatedSVD(n_components=25, random_state=0)
+    print("training svd model with {} dimensions.".format(str(n_dims)))
+    svd = TruncatedSVD(n_components=n_dims, random_state=0)
 
     svd.fit(bow_vector)
 
-    print("finished training svd model")
+    print("finished training svd model.")
 
     return vectorizer, svd
 
-def get_reports_for_date(df, date):
 
+def get_reports_for_date(df, date):
     df_date = df.loc[date:date]
     df_date = df_date.dropna(axis=1)
 
     return df_date
 
-def topic_model_features(reports, vectorizer, model):
 
+def topic_model_features(reports, vectorizer, model):
     if isinstance(reports, pd.DataFrame):
         reports = reports.iloc[0]
 
@@ -71,8 +72,8 @@ def topic_model_features(reports, vectorizer, model):
 
     return vector_topics
 
-def tfidf_features(reports, vectorizer):
 
+def tfidf_features(reports, vectorizer):
     if isinstance(reports, pd.DataFrame):
         reports = reports.iloc[0]
 
@@ -80,25 +81,21 @@ def tfidf_features(reports, vectorizer):
 
 
 def get_returns_for_period(df, start, stop):
-
     df = df.loc[start:stop]
-    #print(df)
+    # print(df)
     df = df.dropna(axis=1)
 
     return df
 
 
 def compute_cov_matrix(returns):
-
     matrix = np.cov(returns.values.transpose())
-    #matrix = np.corrcoef(returns.values.transpose())
-
     df = pd.DataFrame(matrix, index=returns.columns, columns=returns.columns)
 
     return df
 
-def find_column_intersection(list_dfs):
 
+def find_column_intersection(list_dfs):
     list_columns = []
 
     for df in list_dfs:
@@ -115,12 +112,10 @@ def find_column_intersection(list_dfs):
 
 
 def predict_cov_sample(prev_sample):
-
     return compute_cov_matrix(prev_sample).values
 
 
 def predict_mean(prev_sample):
-
     cov_mat = prev_sample.values
     without_diag = cov_mat[~np.eye(cov_mat.shape[0], dtype=bool)].reshape(cov_mat.shape[0], -1)
     mean_cov = np.mean(without_diag)
@@ -130,31 +125,29 @@ def predict_mean(prev_sample):
 
     return mean_cov
 
+
 def eval_predictions(true, pred):
     return (np.square(true - pred)).mean(axis=None)
 
 
 def calculate_portfolio_var(w, sigma):
-
     w = np.asmatrix(w)
     sigma = np.asmatrix(sigma)
 
-    return(w.transpose()*sigma*w)
+    return (w.transpose() * sigma * w)
 
 
 def optimal_portfolio_weights(sigma):
-
     size = sigma.shape[0]
     sigma = np.asmatrix(sigma)
     one = np.ones((size, 1))
     one = np.asmatrix(one)
     w_star = (np.linalg.inv(sigma) * one) / (one.T * np.linalg.inv(sigma) * one)
 
-    return  w_star
+    return w_star
 
 
 def realized_portfolio_returns(returns, w_mat, returns_previous):
-
     w = np.asarray(w_mat).T
     portfolio_returns = returns * w
     whole_portfolio_returns = np.sum(portfolio_returns, axis=1)
@@ -173,15 +166,15 @@ def realized_portfolio_returns(returns, w_mat, returns_previous):
 
     return portfolio_returns
 
+
 def exp_dist(x_1, x_2):
     dist = np.absolute(x_1 - x_2)
     sim = np.exp(-1 * np.square(dist))
 
     return sim
 
+
 def get_similarities_cov(mat, feature_data, sim_function, feature_wise):
-
-
     flat_upper = mat[np.triu_indices(mat.shape[0], k=1)]
     cov_mean = flat_upper.mean()
     cov_demean = flat_upper - cov_mean
@@ -209,14 +202,14 @@ def get_similarities_cov(mat, feature_data, sim_function, feature_wise):
 
 
 def predict_covariance_matrix_model(model, scaler, feature_data, mean_var, mean_cov, feature_wise):
-
-    #for feature wise:
+    # for feature wise:
     if feature_wise:
         sim_measure = lambda x_1, x_2: model.predict(scaler.transform(exp_dist(x_1, x_2).reshape(1, -1)))
 
-    #for pairwise
+    # for pairwise
     else:
-        sim_measure = lambda x_1,x_2 : model.predict(scaler.transform(cosine_similarity(x_1.reshape(1,-1),x_2.reshape(1,-1))))
+        sim_measure = lambda x_1, x_2: model.predict(
+            scaler.transform(cosine_similarity(x_1.reshape(1, -1), x_2.reshape(1, -1))))
 
     matrix = pairwise_distances(feature_data, metric=sim_measure)
     matrix = matrix + mean_cov
@@ -225,46 +218,44 @@ def predict_covariance_matrix_model(model, scaler, feature_data, mean_var, mean_
     return matrix
 
 
-#parameters:
+# parameters:
 time_horizon_quarters = 1
 model = "lda"
 feature_wise = False
+n_dims = 5
 
-#loading data
+# loading data
 df_reports = pd.read_csv("data/reports_with_duplicates_final.csv", dtype="string", index_col="date")
 df_reports.index = pd.to_datetime(df_reports.index)
 df_returns = pd.read_csv("data/stock_returns.csv", index_col="Date")
 df_returns.index = pd.to_datetime(df_returns.index)
 
-
-#defining train test split
+# defining train test split
 train_first = datetime(year=2005, month=12, day=31)
 train_last = datetime(year=2018, month=9, day=30)
 
-if model =="tfidf":
-    #checking if model has been saved
+if model == "tfidf":
+    # checking if model has been saved
     if os.path.isfile("vectorizer.p"):
         vectorizer = pickle.load(open("vectorizer.p", "rb"))
     else:
         vectorizer = train_tfidf_model(df_reports, train_last)
         pickle.dump(vectorizer, open("vectorizer.p", "wb"))
 
-if model =="svd":
-    if os.path.isfile("vectorizer_svd_tuple_25.p"):
-        vectorizer, topic_model = pickle.load(open("vectorizer_svd_tuple_25.p", "rb"))
+if model in ["svd", "lda"]:
+    # string with name for pickle to save model to
+    pickle_name = "vectorizer_{model}_tuple_{dim}.p".format(model=model, dim=n_dims)
+
+    if os.path.isfile(pickle_name):
+        vectorizer, topic_model = pickle.load(open(pickle_name, "rb"))
     else:
-        vectorizer, topic_model = train_svd_model(df_reports, train_last)
-        pickle.dump((vectorizer, topic_model), open("vectorizer_svd_tuple_25.p", "wb"))
+        if model == "svd":
+            vectorizer, topic_model = train_svd_model(df_reports, train_last, n_dims)
+        else:
+            vectorizer, topic_model = train_lda_model(df_reports, train_last, n_dims)
+        pickle.dump((vectorizer, topic_model), open(pickle_name, "wb"))
 
-if model == "lda":
-    if os.path.isfile("vectorizer_lda_tuple_25.p"):
-        vectorizer, topic_model = pickle.load(open("vectorizer_lda_tuple_25.p", "rb"))
-    else:
-        vectorizer, topic_model = train_lda_model(df_reports, train_last)
-        pickle.dump((vectorizer, topic_model), open("vectorizer_lda_tuple_25.p", "wb"))
-
-
-#loading reports for training set
+# loading reports for training set
 df_reports_train = df_reports.loc[train_first:train_last]
 train_range = df_reports_train.index
 
@@ -277,9 +268,9 @@ for date in train_range:
 
     print(date)
 
-    #if datetime(year=2008, month=6, day=30) <= date <= datetime(year=2009, month=3, day=31):
+    # if datetime(year=2008, month=6, day=30) <= date <= datetime(year=2009, month=3, day=31):
     #    continue
-    #returns_stop = date + pd.tseries.offsets.QuarterEnd()
+    # returns_stop = date + pd.tseries.offsets.QuarterEnd()
     returns_stop = date + Timedelta(weeks=52)
 
     reports = get_reports_for_date(df_reports, date)
@@ -305,7 +296,7 @@ for date in train_range:
 
     print(cov.diagonal().mean())
 
-#creating the training data
+# creating the training data
 train_x = np.concatenate(train_x, axis=0)
 train_y = np.concatenate(train_y, axis=0)
 
@@ -322,8 +313,7 @@ lr.fit(train_x, train_y)
 # mean variance in the sample, as model doesn't predict variance
 sample_mean_var = np.mean(mean_covs)
 
-
-#the following is to test to trained model
+# the following is to test to trained model
 total_quarters = 8
 
 test_intervals = int(total_quarters / time_horizon_quarters)
@@ -342,7 +332,8 @@ for i in range(test_intervals):
     out_of_sample_start = sample_stop + DateOffset(days=1)
     out_of_sample_stop = out_of_sample_start + QuarterEnd(startingMonth=3, n=time_horizon_quarters)
 
-    # creating the reports and returns for the test. Includes sample (previous time frame used for empirical estimation) and the test set
+    # creating the reports and returns for the test.
+    # Includes sample (previous time frame used for empirical estimation) and the test set
     returns_sample = get_returns_for_period(df_returns, sample_start, sample_stop)
     returns_out_of_sample = get_returns_for_period(df_returns, out_of_sample_start, out_of_sample_stop)
 
@@ -419,13 +410,12 @@ for i in range(test_intervals):
     print("combined cov portfolio")
     r_combined = realized_portfolio_returns(returns_out_of_sample.values, w_combined, r_combined)
 
-
-#plotting the returns
+# plotting the returns
 x = range(len(r_equal))
 plt.plot(x, r_equal, label="market")
-#plt.plot(x, r_sample, label="sample")
-#plt.plot(x, r_lw, label="ledoit wolf")
-#plt.plot(x, r_model, label="lda model")
+# plt.plot(x, r_sample, label="sample")
+plt.plot(x, r_lw, label="ledoit wolf")
+# plt.plot(x, r_model, label="lda model")
 plt.plot(x, r_combined, label="combined")
 
 plt.legend()
