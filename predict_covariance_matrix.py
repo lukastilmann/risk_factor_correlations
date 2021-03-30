@@ -180,10 +180,14 @@ def exp_dist(x_1, x_2):
     return sim
 
 
-def get_similarities_cov(mat, feature_data, sim_function, feature_wise):
+def get_similarities_cov(mat, feature_data, sim_function, feature_wise, standardize):
     flat_upper = mat[np.triu_indices(mat.shape[0], k=1)]
-    cov_mean = flat_upper.mean()
-    cov_demean = flat_upper - cov_mean
+
+    if standardize:
+        cov_mean = flat_upper.mean()
+        cov_mat = flat_upper - cov_mean
+    else:
+        cov_mat = flat_upper
 
     n = feature_data.shape[0]
 
@@ -204,10 +208,10 @@ def get_similarities_cov(mat, feature_data, sim_function, feature_wise):
         similarities = sim_function(feature_data)
         similarities = similarities[np.triu_indices(similarities.shape[0], k=1)]
 
-    return similarities, cov_demean
+    return similarities, cov_mat
 
 
-def predict_covariance_matrix_model(model, scaler, feature_data, mean_var, mean_cov, feature_wise):
+def predict_covariance_matrix_model(model, scaler, feature_data, mean_var, mean_cov, feature_wise, add_mean):
     # for feature wise:
     if feature_wise:
         sim_measure = lambda x_1, x_2: model.predict(scaler.transform(exp_dist(x_1, x_2).reshape(1, -1)))
@@ -218,7 +222,8 @@ def predict_covariance_matrix_model(model, scaler, feature_data, mean_var, mean_
             scaler.transform(cosine_similarity(x_1.reshape(1, -1), x_2.reshape(1, -1))))
 
     matrix = pairwise_distances(feature_data, metric=sim_measure)
-    matrix = matrix + mean_cov
+    if add_mean:
+        matrix = matrix + mean_cov
     np.fill_diagonal(matrix, mean_var)
 
     return matrix
@@ -230,6 +235,8 @@ model = "tfidf"
 idf = False
 feature_wise = False
 n_dims = 5
+with_intercept = True
+standardize_cov_matrix = False
 
 # loading data
 df_reports = pd.read_csv("data/reports_with_duplicates_final.csv", dtype="string", index_col="date")
@@ -299,9 +306,9 @@ for date in train_range:
         reports_features = topic_model_features(reports, vectorizer, topic_model)
 
     if feature_wise:
-        sim, cov_upper_dig = get_similarities_cov(cov, reports_features, exp_dist, True)
+        sim, cov_upper_dig = get_similarities_cov(cov, reports_features, exp_dist, feature_wise=True, standardize=standardize_cov_matrix)
     else:
-        sim, cov_upper_dig = get_similarities_cov(cov, reports_features, cosine_similarity, feature_wise=False)
+        sim, cov_upper_dig = get_similarities_cov(cov, reports_features, cosine_similarity, feature_wise=False, standardize=standardize_cov_matrix)
 
     train_x.append(sim)
     train_y.append(cov_upper_dig)
@@ -320,7 +327,7 @@ if not feature_wise:
 train_x = scaler.fit_transform(train_x)
 
 # regression model for prediction
-lr = LinearRegression(fit_intercept=False)
+lr = LinearRegression(fit_intercept=with_intercept)
 lr.fit(train_x, train_y)
 
 # mean variance in the sample, as model doesn't predict variance
@@ -370,8 +377,9 @@ for i in range(test_intervals):
 
     cov_upper = cov[np.triu_indices(cov.shape[0], k=1)]
     sample_mean_cov = cov_upper.mean()
+
     cov_model = predict_covariance_matrix_model(lr, scaler, reports_features_out_of_sample, sample_mean_var,
-                                                sample_mean_cov, feature_wise)
+                                                sample_mean_cov, feature_wise, standardize_cov_matrix)
 
     cov_equal = np.full(cov_sample.shape, sample_mean_cov)
     np.fill_diagonal(cov_equal, sample_mean_var)
