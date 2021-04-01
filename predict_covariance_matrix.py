@@ -94,8 +94,11 @@ def get_returns_for_period(df, start, stop):
     return df
 
 
-def compute_cov_matrix(returns):
-    matrix = np.cov(returns.values.transpose())
+def compute_cov_matrix(returns, corr=False):
+    if corr:
+        matrix = np.corrcoef(returns.values.transpose())
+    else:
+        matrix = np.cov(returns.values.transpose())
     df = pd.DataFrame(matrix, index=returns.columns, columns=returns.columns)
 
     return df
@@ -117,8 +120,9 @@ def find_column_intersection(list_dfs):
     return list_dfs_new
 
 
-def predict_cov_sample(prev_sample):
-    return compute_cov_matrix(prev_sample).values
+def predict_cov_sample(prev_sample, corr=False):
+
+    return compute_cov_matrix(prev_sample, corr).values
 
 
 def predict_mean(prev_sample):
@@ -228,6 +232,34 @@ def predict_covariance_matrix_model(model, scaler, feature_data, mean_var, mean_
 
     return matrix
 
+def constant_covariance_model(sample_cov, mean_corr):
+
+    v = np.diag(sample_cov)
+
+    cov_est = np.full(sample_cov.shape, mean_corr)
+
+    np.fill_diagonal(cov_est, 1)
+
+    v = np.asmatrix(v)
+
+    #print(v)
+
+    #print(cov_est)
+
+    cov_mul = np.matmul(v.T, v)
+
+    #print(cov_mul)
+    root = np.sqrt(cov_mul)
+
+    #print(root)
+
+    #cov_est = cov_est * np.sqrt(cov_mul)
+    cov_est = np.multiply(cov_est, root)
+
+    #print(cov_est)
+
+    return(cov_est)
+
 
 # parameters:
 time_horizon_quarters = 1
@@ -235,8 +267,8 @@ model = "tfidf"
 idf = False
 feature_wise = False
 n_dims = 5
-with_intercept = True
-standardize_cov_matrix = False
+with_intercept = False
+standardize_cov_matrix = True
 
 # loading data
 df_reports = pd.read_csv("data/reports_with_duplicates_final.csv", dtype="string", index_col="date")
@@ -299,6 +331,7 @@ for date in train_range:
     returns, reports = find_column_intersection([returns, reports])
 
     cov = predict_cov_sample(returns)
+    cor = predict_cov_sample(returns, True)
 
     if model == "tfidf":
         reports_features = tfidf_features(reports, vectorizer)
@@ -314,7 +347,9 @@ for date in train_range:
     train_y.append(cov_upper_dig)
     mean_covs.append(cov.diagonal().mean())
 
-    print(cov.diagonal().mean())
+    #print(cor.diagonal().mean())
+    cor_upper = cor[np.triu_indices(cor.shape[0], k=1)]
+    print(cor_upper.mean())
 
 # creating the training data
 train_x = np.concatenate(train_x, axis=0)
@@ -339,6 +374,7 @@ total_quarters = 8
 test_intervals = int(total_quarters / time_horizon_quarters)
 
 r_equal = [100]
+r_constant = [100]
 r_sample = [100]
 r_lw = [100]
 r_model = [100]
@@ -374,15 +410,21 @@ for i in range(test_intervals):
 
     # different covariance matrix predictions
     cov_sample = predict_cov_sample(returns_sample)
+    cor_sample = predict_cov_sample(returns_sample, True)
 
-    cov_upper = cov[np.triu_indices(cov.shape[0], k=1)]
+    cov_upper = cov_sample[np.triu_indices(cov_sample.shape[0], k=1)]
+    cor_upper = cor_sample[np.triu_indices(cor_sample.shape[0], k=1)]
     sample_mean_cov = cov_upper.mean()
+    sample_mean_cor = cor_upper.mean()
+    sample_mean_var = np.diagonal(cov_sample).mean()
 
     cov_model = predict_covariance_matrix_model(lr, scaler, reports_features_out_of_sample, sample_mean_var,
                                                 sample_mean_cov, feature_wise, standardize_cov_matrix)
 
     cov_equal = np.full(cov_sample.shape, sample_mean_cov)
     np.fill_diagonal(cov_equal, sample_mean_var)
+
+    cov_constant = constant_covariance_model(cov_sample, sample_mean_cor)
 
     LW = LedoitWolf()
     cov_lw = LW.fit(returns_sample).covariance_
@@ -398,6 +440,9 @@ for i in range(test_intervals):
     print("frobenius norm for cov equal")
     print(np.linalg.norm(cov_true - cov_equal, ord="fro"))
 
+    print("frobenius norm for cov constant")
+    print(np.linalg.norm(cov_true - cov_constant, ord="fro"))
+
     print("frobenius norm for sample cov")
     print(np.linalg.norm(cov_true - cov_sample, ord="fro"))
 
@@ -412,6 +457,7 @@ for i in range(test_intervals):
 
     # constructing portfolios based on predictions
     w_equal = optimal_portfolio_weights(cov_equal)
+    w_constant = optimal_portfolio_weights(cov_constant)
     w_sample = optimal_portfolio_weights(cov_sample)
     w_lw = optimal_portfolio_weights(cov_lw)
     w_model = optimal_portfolio_weights(cov_model)
@@ -422,6 +468,8 @@ for i in range(test_intervals):
 
     print("equal cov portfolio")
     rs_equal = realized_portfolio_returns(returns_out_of_sample.values, w_equal, r_equal)
+    print("constant cov portfolio")
+    rs_constant = realized_portfolio_returns(returns_out_of_sample.values, w_constant, r_constant)
     print("sample cov portfolio")
     r_sample = realized_portfolio_returns(returns_out_of_sample.values, w_sample, r_sample)
     print("ledoit wolf cov portfolio")
