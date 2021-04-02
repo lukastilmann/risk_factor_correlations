@@ -232,33 +232,44 @@ def predict_covariance_matrix_model(model, scaler, feature_data, mean_var, mean_
 
     return matrix
 
+
+def corr_matrix_to_cov_matrix(cor_matrix, diag):
+
+    v = np.asmatrix(diag)
+    v_matrix = np.sqrt(np.matmul(v.T, v))
+    cov_est = np.multiply(cor_matrix, v_matrix)
+
+    return cov_est
+
+
+def predict_correlation_matrix_model(model, scaler, feature_data, mean_cor, feature_wise, add_mean, cov_mat):
+    # for feature wise:
+    if feature_wise:
+        sim_measure = lambda x_1, x_2: model.predict(scaler.transform(exp_dist(x_1, x_2).reshape(1, -1)))
+
+    # for pairwise
+    else:
+        sim_measure = lambda x_1, x_2: model.predict(
+            scaler.transform(cosine_similarity(x_1.reshape(1, -1), x_2.reshape(1, -1))))
+
+    matrix = pairwise_distances(feature_data, metric=sim_measure)
+    if add_mean:
+        matrix = matrix + mean_cor
+    np.fill_diagonal(matrix, 1)
+    diag = np.diag(cov_mat)
+    matrix = corr_matrix_to_cov_matrix(matrix, diag)
+
+    return matrix
+
+
 def constant_covariance_model(sample_cov, mean_corr):
 
-    v = np.diag(sample_cov)
+    diag = np.diag(sample_cov)
+    cor_matrix = np.full(sample_cov.shape, mean_corr)
+    np.fill_diagonal(cor_matrix, 1)
+    cov_est = corr_matrix_to_cov_matrix(cor_matrix, diag)
 
-    cov_est = np.full(sample_cov.shape, mean_corr)
-
-    np.fill_diagonal(cov_est, 1)
-
-    v = np.asmatrix(v)
-
-    #print(v)
-
-    #print(cov_est)
-
-    cov_mul = np.matmul(v.T, v)
-
-    #print(cov_mul)
-    root = np.sqrt(cov_mul)
-
-    #print(root)
-
-    #cov_est = cov_est * np.sqrt(cov_mul)
-    cov_est = np.multiply(cov_est, root)
-
-    #print(cov_est)
-
-    return(cov_est)
+    return cov_est
 
 
 # parameters:
@@ -269,6 +280,7 @@ feature_wise = False
 n_dims = 5
 with_intercept = False
 standardize_cov_matrix = True
+predict_corr = True
 
 # loading data
 df_reports = pd.read_csv("data/reports_with_duplicates_final.csv", dtype="string", index_col="date")
@@ -313,7 +325,7 @@ train_range = df_reports_train.index
 
 train_x = []
 train_y = []
-mean_covs = []
+##mean_covs = []
 mean_sims = []
 
 for date in train_range:
@@ -338,14 +350,19 @@ for date in train_range:
     if model in ["svd", "lda"]:
         reports_features = topic_model_features(reports, vectorizer, topic_model)
 
-    if feature_wise:
-        sim, cov_upper_dig = get_similarities_cov(cov, reports_features, exp_dist, feature_wise=True, standardize=standardize_cov_matrix)
+    if predict_corr:
+        est_target = cor
     else:
-        sim, cov_upper_dig = get_similarities_cov(cov, reports_features, cosine_similarity, feature_wise=False, standardize=standardize_cov_matrix)
+        est_target = cov
+
+    if feature_wise:
+        sim, est_target_upper_dig = get_similarities_cov(est_target, reports_features, exp_dist, feature_wise=True, standardize=standardize_cov_matrix)
+    else:
+        sim, est_target_upper_dig = get_similarities_cov(est_target, reports_features, cosine_similarity, feature_wise=False, standardize=standardize_cov_matrix)
 
     train_x.append(sim)
-    train_y.append(cov_upper_dig)
-    mean_covs.append(cov.diagonal().mean())
+    train_y.append(est_target_upper_dig)
+    #mean_covs.append(cov.diagonal().mean())
 
     #print(cor.diagonal().mean())
     cor_upper = cor[np.triu_indices(cor.shape[0], k=1)]
@@ -366,7 +383,7 @@ lr = LinearRegression(fit_intercept=with_intercept)
 lr.fit(train_x, train_y)
 
 # mean variance in the sample, as model doesn't predict variance
-sample_mean_var = np.mean(mean_covs)
+#sample_mean_var = np.mean(mean_covs)
 
 # the following is to test to trained model
 total_quarters = 8
@@ -418,8 +435,12 @@ for i in range(test_intervals):
     sample_mean_cor = cor_upper.mean()
     sample_mean_var = np.diagonal(cov_sample).mean()
 
-    cov_model = predict_covariance_matrix_model(lr, scaler, reports_features_out_of_sample, sample_mean_var,
-                                                sample_mean_cov, feature_wise, standardize_cov_matrix)
+    if predict_corr:
+        cov_model = predict_correlation_matrix_model(lr, scaler, reports_features_out_of_sample, sample_mean_cor,
+                                                     feature_wise, standardize_cov_matrix, cov_sample)
+    else:
+        cov_model = predict_covariance_matrix_model(lr, scaler, reports_features_out_of_sample, sample_mean_var,
+                                                    sample_mean_cov, feature_wise, standardize_cov_matrix)
 
     cov_equal = np.full(cov_sample.shape, sample_mean_cov)
     np.fill_diagonal(cov_equal, sample_mean_var)
