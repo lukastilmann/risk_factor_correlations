@@ -12,6 +12,7 @@ from datetime import datetime
 from pandas.tseries.offsets import QuarterBegin, QuarterEnd, DateOffset
 from pandas import Timedelta
 import matplotlib.pyplot as plt
+import csv
 
 
 def train_tfidf_model(df, train_last, idf=True):
@@ -174,7 +175,7 @@ def realized_portfolio_returns(returns, w_mat, returns_previous):
     print("r var: " + str(return_var))
     print("-----")
 
-    return portfolio_returns
+    return portfolio_returns, return_var
 
 
 def exp_dist(x_1, x_2):
@@ -281,6 +282,7 @@ n_dims = 5
 with_intercept = False
 standardize_cov_matrix = True
 predict_corr = True
+trial_name = "tfidf_1Q_corr_no_standardize"
 
 # loading data
 df_reports = pd.read_csv("data/reports_with_duplicates_final.csv", dtype="string", index_col="date")
@@ -397,6 +399,9 @@ r_lw = [100]
 r_model = [100]
 r_combined = [100]
 
+frob_rows = [["period", "equal", "constant", "sample", "lw", "model", "combined"]]
+var_rows = [["period", "equal", "constant", "sample", "lw", "model", "combined"]]
+
 for i in range(test_intervals):
 
     sample_start = datetime(year=2018, month=1, day=1) + QuarterBegin(startingMonth=1, n=i * time_horizon_quarters)
@@ -455,26 +460,35 @@ for i in range(test_intervals):
     # empirical variance for the out of sample time frame
     cov_true = compute_cov_matrix(returns_out_of_sample)
 
+    frob_results_line = [sample_stop, np.linalg.norm(cov_true - cov_equal, ord="fro"),
+                         np.linalg.norm(cov_true - cov_constant, ord="fro"),
+                         np.linalg.norm(cov_true - cov_sample, ord="fro"), np.linalg.norm(cov_true - cov_lw, ord="fro"),
+                         np.linalg.norm(cov_true - cov_model, ord="fro"),
+                         np.linalg.norm(cov_true - cov_combined, ord="fro")]
+
     # evaluation of the predictions
     print("--------eval-------- ")
 
     print("frobenius norm for cov equal")
-    print(np.linalg.norm(cov_true - cov_equal, ord="fro"))
+    print(frob_results_line[1])
 
     print("frobenius norm for cov constant")
-    print(np.linalg.norm(cov_true - cov_constant, ord="fro"))
+    print(frob_results_line[2])
 
     print("frobenius norm for sample cov")
-    print(np.linalg.norm(cov_true - cov_sample, ord="fro"))
+    print(frob_results_line[3])
 
     print("frobenius norm for ledoit wolf estimator")
-    print(np.linalg.norm(cov_true - cov_lw, ord="fro"))
+    print(frob_results_line[4])
 
     print("frobenius norm using nlu model on risk reports")
-    print(np.linalg.norm(cov_true - cov_model, ord="fro"))
+    print(frob_results_line[5])
 
     print("frobenius norm of combined estimates of lw and model")
-    print(np.linalg.norm(cov_true - cov_combined, ord="fro"))
+    print(frob_results_line[6])
+
+    #writing results to csv file
+    frob_rows.append(frob_results_line)
 
     # constructing portfolios based on predictions
     w_equal = optimal_portfolio_weights(cov_equal)
@@ -488,17 +502,30 @@ for i in range(test_intervals):
     print("-----compute returns----")
 
     print("equal cov portfolio")
-    rs_equal = realized_portfolio_returns(returns_out_of_sample.values, w_equal, r_equal)
+    r_equal, r_equal_var = realized_portfolio_returns(returns_out_of_sample.values, w_equal, r_equal)
     print("constant cov portfolio")
-    rs_constant = realized_portfolio_returns(returns_out_of_sample.values, w_constant, r_constant)
+    r_constant, r_constant_var = realized_portfolio_returns(returns_out_of_sample.values, w_constant, r_constant)
     print("sample cov portfolio")
-    r_sample = realized_portfolio_returns(returns_out_of_sample.values, w_sample, r_sample)
+    r_sample, r_sample_var = realized_portfolio_returns(returns_out_of_sample.values, w_sample, r_sample)
     print("ledoit wolf cov portfolio")
-    r_lw = realized_portfolio_returns(returns_out_of_sample.values, w_lw, r_lw)
+    r_lw, r_lw_var = realized_portfolio_returns(returns_out_of_sample.values, w_lw, r_lw)
     print("model cov portfolio")
-    r_model = realized_portfolio_returns(returns_out_of_sample.values, w_model, r_model)
+    r_model, r_model_var = realized_portfolio_returns(returns_out_of_sample.values, w_model, r_model)
     print("combined cov portfolio")
-    r_combined = realized_portfolio_returns(returns_out_of_sample.values, w_combined, r_combined)
+    r_combined, r_combined_var = realized_portfolio_returns(returns_out_of_sample.values, w_combined, r_combined)
+
+    var_line = [sample_stop, r_equal_var, r_constant_var, r_sample_var, r_lw_var, r_model_var, r_combined_var]
+
+    var_rows.append(var_line)
+
+#csv file writers to save results
+with open("results/frob_" + trial_name + ".csv", "w", newline="") as file:
+    frob_writer = csv.writer(file, delimiter=';', quoting=csv.QUOTE_MINIMAL)
+    frob_writer.writerows(frob_rows)
+with open("results/var_" + trial_name + ".csv", "w", newline="") as file:
+    var_writer = csv.writer(file, delimiter=';', quoting=csv.QUOTE_MINIMAL)
+    var_writer.writerows(var_rows)
+
 
 # plotting the returns
 x = range(len(r_equal))
