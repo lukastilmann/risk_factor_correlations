@@ -49,7 +49,7 @@ def train_lda_model(df, train_last, n_dims):
 def train_svd_model(df, train_last, n_dims):
     corpus = df.loc[:train_last].values.flatten()
     notna_corpus = corpus[~pd.isnull(corpus)]
-    vectorizer = CountVectorizer(stop_words="english", min_df=10)
+    vectorizer = TfidfVectorizer(stop_words="english", strip_accents="unicode", min_df=10, use_idf=True)
     bow_vector = vectorizer.fit_transform(notna_corpus)
 
     print("training svd model with {} dimensions.".format(str(n_dims)))
@@ -165,22 +165,33 @@ def realized_portfolio_returns(returns, w_mat, returns_previous):
 
     return_mean = whole_portfolio_returns.mean()
     return_var = whole_portfolio_returns.var()
+    return_std = np.sqrt(return_var)
     sharpe = (return_mean / np.sqrt(return_var)) * np.sqrt(252)
 
-    portfolio_returns = returns_previous
-    for r in whole_portfolio_returns:
-        portfolio_returns.append(portfolio_returns[-1] * (1 + r))
+    #portfolio_returns = returns_previous
+    #for r in whole_portfolio_returns:
+    #    portfolio_returns.append(portfolio_returns[-1] * (1 + r))
 
     print("sharpe ratio: " + str(sharpe))
-    print("r var: " + str(return_var))
+    print("r std: " + str(return_std))
     print("-----")
 
-    return portfolio_returns, return_var
+    portfolio_returns = np.concatenate((returns_previous, whole_portfolio_returns))
+
+    return portfolio_returns, return_std
+
+def realize_returns(start, portfolio_returns):
+
+    port_returns = [start]
+    for r in portfolio_returns:
+        port_returns.append(port_returns[-1] * (1 + r))
+
+    return port_returns
 
 
 def exp_dist(x_1, x_2):
     dist = np.absolute(x_1 - x_2)
-    sim = np.exp(-1 * np.square(dist))
+    sim = np.exp(-1 * dist)
 
     return sim
 
@@ -275,14 +286,14 @@ def constant_covariance_model(sample_cov, mean_corr):
 
 # parameters:
 time_horizon_quarters = 1
-model = "tfidf"
+model = "svm"
 idf = False
 feature_wise = False
-n_dims = 5
+n_dims = 200
 with_intercept = False
 standardize_cov_matrix = True
-predict_corr = True
-trial_name = "tfidf_1Q_corr_no_standardize"
+predict_corr = False
+trial_name = "tf_1Q__cov_standardize_horizon1Q"
 
 # loading data
 df_reports = pd.read_csv("data/reports_with_duplicates_final.csv", dtype="string", index_col="date")
@@ -332,12 +343,14 @@ mean_sims = []
 
 for date in train_range:
 
-    print(date)
-
     # if datetime(year=2008, month=6, day=30) <= date <= datetime(year=2009, month=3, day=31):
     #    continue
-    # returns_stop = date + pd.tseries.offsets.QuarterEnd()
-    returns_stop = date + Timedelta(weeks=52)
+    returns_stop = date + QuarterEnd(startingMonth=3, n=time_horizon_quarters)
+    #returns_stop = date + Timedelta(weeks=52)
+
+    print("training for period:")
+    print(date + pd.DateOffset(days=1))
+    print(returns_stop)
 
     reports = get_reports_for_date(df_reports, date)
     returns = get_returns_for_period(df_returns, date + pd.DateOffset(days=1), returns_stop)
@@ -392,15 +405,18 @@ total_quarters = 8
 
 test_intervals = int(total_quarters / time_horizon_quarters)
 
-r_equal = [100]
-r_constant = [100]
-r_sample = [100]
-r_lw = [100]
-r_model = [100]
-r_combined = [100]
+r_equal = np.array([])
+r_constant = np.array([])
+r_sample = np.array([])
+r_lw = np.array([])
+r_model = np.array([])
+r_combined = np.array([])
 
-frob_rows = [["period", "equal", "constant", "sample", "lw", "model", "combined"]]
-var_rows = [["period", "equal", "constant", "sample", "lw", "model", "combined"]]
+frob_rows = []
+df_columns = ["equal", "constant", "sample", "lw", "model", "combined"]
+df_index = []
+var_rows = []
+
 
 for i in range(test_intervals):
 
@@ -460,35 +476,35 @@ for i in range(test_intervals):
     # empirical variance for the out of sample time frame
     cov_true = compute_cov_matrix(returns_out_of_sample)
 
-    frob_results_line = [sample_stop, np.linalg.norm(cov_true - cov_equal, ord="fro"),
+    frob_results_line = [np.linalg.norm(cov_true - cov_equal, ord="fro"),
                          np.linalg.norm(cov_true - cov_constant, ord="fro"),
                          np.linalg.norm(cov_true - cov_sample, ord="fro"), np.linalg.norm(cov_true - cov_lw, ord="fro"),
                          np.linalg.norm(cov_true - cov_model, ord="fro"),
                          np.linalg.norm(cov_true - cov_combined, ord="fro")]
 
+    df_index.append(sample_stop)
+    frob_rows.append(frob_results_line)
+
     # evaluation of the predictions
     print("--------eval-------- ")
 
     print("frobenius norm for cov equal")
-    print(frob_results_line[1])
+    print(frob_results_line[0])
 
     print("frobenius norm for cov constant")
-    print(frob_results_line[2])
+    print(frob_results_line[1])
 
     print("frobenius norm for sample cov")
-    print(frob_results_line[3])
+    print(frob_results_line[2])
 
     print("frobenius norm for ledoit wolf estimator")
-    print(frob_results_line[4])
+    print(frob_results_line[3])
 
     print("frobenius norm using nlu model on risk reports")
-    print(frob_results_line[5])
+    print(frob_results_line[4])
 
     print("frobenius norm of combined estimates of lw and model")
-    print(frob_results_line[6])
-
-    #writing results to csv file
-    frob_rows.append(frob_results_line)
+    print(frob_results_line[5])
 
     # constructing portfolios based on predictions
     w_equal = optimal_portfolio_weights(cov_equal)
@@ -514,26 +530,47 @@ for i in range(test_intervals):
     print("combined cov portfolio")
     r_combined, r_combined_var = realized_portfolio_returns(returns_out_of_sample.values, w_combined, r_combined)
 
-    var_line = [sample_stop, r_equal_var, r_constant_var, r_sample_var, r_lw_var, r_model_var, r_combined_var]
+    var_line = [r_equal_var, r_constant_var, r_sample_var, r_lw_var, r_model_var, r_combined_var]
 
     var_rows.append(var_line)
 
 #csv file writers to save results
-with open("results/frob_" + trial_name + ".csv", "w", newline="") as file:
-    frob_writer = csv.writer(file, delimiter=';', quoting=csv.QUOTE_MINIMAL)
-    frob_writer.writerows(frob_rows)
-with open("results/var_" + trial_name + ".csv", "w", newline="") as file:
-    var_writer = csv.writer(file, delimiter=';', quoting=csv.QUOTE_MINIMAL)
-    var_writer.writerows(var_rows)
+#with open("results/frob_" + trial_name + ".csv", "w", newline="") as file:
+#    frob_writer = csv.writer(file, delimiter=';', quoting=csv.QUOTE_MINIMAL)
+#    frob_writer.writerows(frob_rows)
+#with open("results/std_" + trial_name + ".csv", "w", newline="") as file:
+#    var_writer = csv.writer(file, delimiter=';', quoting=csv.QUOTE_MINIMAL)
+#    var_writer.writerows(var_rows)
 
+df_frob = pd.DataFrame(frob_rows, columns=df_columns, index=df_index)
+df_frob.loc["all"] = df_frob.mean(axis=0)
+df_frob["impr_model"] = (df_frob["model"]/df_frob["equal"]) - 1
+df_frob["impr_comb"] = (df_frob["combined"]/df_frob["equal"]) - 1
+
+print(df_frob)
+
+std_whole = [r_equal.std(), r_constant.std(), r_sample.std(), r_lw.std(), r_model.std(), r_combined.std()]
+df_var = pd.DataFrame(var_rows, columns=df_columns, index=df_index)
+df_var.loc["mean"] = df_var.mean(axis=0)
+df_var.loc["whole"] = std_whole
+df_var["impr_model"] = (df_var["model"]/df_var["equal"]) - 1
+df_var["impr_comb"] = (df_var["combined"]/df_var["equal"]) - 1
+
+print(df_var)
+
+port_r_equal = realize_returns(100, r_equal)
+port_r_combined = realize_returns(100, r_combined)
+
+df_frob.to_csv("results/frob_" + trial_name + ".csv", sep=";")
+df_var.to_csv("results/std_" + trial_name + ".csv", sep=";")
 
 # plotting the returns
-x = range(len(r_equal))
-plt.plot(x, r_equal, label="market")
+x = range(len(port_r_equal))
+plt.plot(x, port_r_equal, label="market")
 # plt.plot(x, r_sample, label="sample")
-plt.plot(x, r_lw, label="ledoit wolf")
+#plt.plot(x, r_lw, label="ledoit wolf")
 # plt.plot(x, r_model, label="lda model")
-plt.plot(x, r_combined, label="combined")
+plt.plot(x, port_r_combined, label="combined")
 
 plt.legend()
 
