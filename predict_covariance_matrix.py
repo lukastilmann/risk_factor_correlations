@@ -191,7 +191,7 @@ def realize_returns(start, portfolio_returns):
 
 def exp_dist(x_1, x_2):
     dist = np.absolute(x_1 - x_2)
-    sim = np.exp(-1 * dist)
+    sim = np.exp(-1 * np.square(dist))
 
     return sim
 
@@ -283,27 +283,79 @@ def constant_covariance_model(sample_cov, mean_corr):
 
     return cov_est
 
+def predict_cov_window_model(prev_cov, feature_data_prev, feature_data_next):
+
+    sim_measure = lambda x_1, x_2: cosine_similarity(x_1.reshape(1, -1), x_2.reshape(1, -1))
+
+    matrix_prev = pairwise_distances(feature_data_prev, metric=sim_measure)
+    np.fill_diagonal(matrix_prev, 0)
+    intercept_matrix = np.zeros(matrix_prev.shape)
+    np.fill_diagonal(intercept_matrix, 1)
+
+    train_x = np.concatenate([intercept_matrix.reshape((1,-1)), matrix_prev.reshape(1,-1)], axis=1)
+    train_y = prev_cov.reshape(1,-1)
+
+    lin_reg = LinearRegression(fit_intercept=False).fit(train_x, train_y)
+
+    matrix_next = pairwise_distances(feature_data_next, metric=sim_measure)
+    np.fill_diagonal(matrix_next, 0)
+    intercept_matrix = np.zeros(matrix_next.shape)
+    np.fill_diagonal(intercept_matrix, 1)
+
+    next_x = np.concatenate([intercept_matrix.reshape((1,-1)), matrix_prev.reshape(1,-1)], axis=1)
+
+    pred_y = lin_reg.predict(next_x)
+    matrix_pred = np.reshape(pred_y, matrix_next.shape)
+
+    return matrix_pred
+
+
 
 # parameters:
+#how many quarters are in one sub-period
 time_horizon_quarters = 1
-model = "svm"
-idf = False
+#frequency of returns
+frequency = "daily"
+#can be "eval" for evaluating hyperparameters on the 2017-2018 sample or test for testing on 2019-2020 sample
+mode = "eval"
+#if "window", the model is trained on the preceding sample only
+#if "whole", a model trained on the whole period before the test/eval sample is used
+model_train_sample = "window"
+#the featuee embedding that is used. Options are "lda", "tfidf" and "lsa"
+model = "lda"
+#if using tfidf-space as embedding, this specifies if inverse document frrequency-weighting is applied
+idf = True
+#if true, feature-wise similarity measure is used
 feature_wise = False
-n_dims = 200
+#when using topic model (lsa or lda), this specifies the number of topics
+n_dims = 5
+#specifies if the regression model is fit with intercept
 with_intercept = False
+#specifies if cov-matrix is standardized by subtracting the mean covariance
 standardize_cov_matrix = True
+#if true, the model predicts correlation, not covariance. Only works with model trained on whole sample, not window
 predict_corr = False
-trial_name = "tf_1Q__cov_standardize_horizon1Q"
+#the weight applied to the estimation generated from model when using the ensemble of model and lw-estimator
+ensemble_weight = 0.1
+#name of the files in which results are saved
+trial_name = "lda5dim_cov_standardize_horizon2Q_daily_window_ensemble0.1"
 
 # loading data
 df_reports = pd.read_csv("data/reports_with_duplicates_final.csv", dtype="string", index_col="date")
 df_reports.index = pd.to_datetime(df_reports.index)
-df_returns = pd.read_csv("data/stock_returns.csv", index_col="Date")
+if frequency == "daily":
+    df_returns = pd.read_csv("data/stock_returns.csv", index_col="Date")
+if frequency == "weekly":
+    df_returns = pd.read_csv("data/stock_returns_weekly.csv", index_col="Date")
+
 df_returns.index = pd.to_datetime(df_returns.index)
 
 # defining train test split
 train_first = datetime(year=2005, month=12, day=31)
-train_last = datetime(year=2018, month=9, day=30)
+if mode == "eval":
+    train_last = datetime(year=2016, month=9, day=30)
+if mode == "test":
+    train_last = datetime(year=2018, month=9, day=30)
 
 if model == "tfidf":
     # string with pickle name for saved model
@@ -338,73 +390,75 @@ train_range = df_reports_train.index
 
 train_x = []
 train_y = []
-##mean_covs = []
 mean_sims = []
 
-for date in train_range:
+if model_train_sample == "whole":
+    for date in train_range:
 
-    # if datetime(year=2008, month=6, day=30) <= date <= datetime(year=2009, month=3, day=31):
-    #    continue
-    returns_stop = date + QuarterEnd(startingMonth=3, n=time_horizon_quarters)
-    #returns_stop = date + Timedelta(weeks=52)
+        returns_stop = date + QuarterEnd(startingMonth=3, n=time_horizon_quarters)
 
-    print("training for period:")
-    print(date + pd.DateOffset(days=1))
-    print(returns_stop)
+        print("training for period:")
+        print(date + pd.DateOffset(days=1))
+        print(returns_stop)
 
-    reports = get_reports_for_date(df_reports, date)
-    returns = get_returns_for_period(df_returns, date + pd.DateOffset(days=1), returns_stop)
+        #loading reports and returns for period, finding the companies in which both datapoints exist
+        reports = get_reports_for_date(df_reports, date)
+        returns = get_returns_for_period(df_returns, date + pd.DateOffset(days=1), returns_stop)
+        returns, reports = find_column_intersection([returns, reports])
 
-    returns, reports = find_column_intersection([returns, reports])
+        #covariance and correlation matrix for period
+        cov = predict_cov_sample(returns)
+        cor = predict_cov_sample(returns, True)
 
-    cov = predict_cov_sample(returns)
-    cor = predict_cov_sample(returns, True)
+        #feature engineering
+        if model == "tfidf":
+            reports_features = tfidf_features(reports, vectorizer)
+        if model in ["svd", "lda"]:
+            reports_features = topic_model_features(reports, vectorizer, topic_model)
 
-    if model == "tfidf":
-        reports_features = tfidf_features(reports, vectorizer)
-    if model in ["svd", "lda"]:
-        reports_features = topic_model_features(reports, vectorizer, topic_model)
+        if predict_corr:
+            est_target = cor
+        else:
+            est_target = cov
 
-    if predict_corr:
-        est_target = cor
-    else:
-        est_target = cov
+        #computing similarity matrix and getting the upper diagonal of covariance- and similarity-matrix
+        #in a 1-dimensional vector
+        if feature_wise:
+            sim, est_target_upper_dig = get_similarities_cov(est_target, reports_features, exp_dist, feature_wise=True,
+                                                             standardize=standardize_cov_matrix)
+        else:
+            sim, est_target_upper_dig = get_similarities_cov(est_target, reports_features, cosine_similarity,
+                                                             feature_wise=False, standardize=standardize_cov_matrix)
 
-    if feature_wise:
-        sim, est_target_upper_dig = get_similarities_cov(est_target, reports_features, exp_dist, feature_wise=True, standardize=standardize_cov_matrix)
-    else:
-        sim, est_target_upper_dig = get_similarities_cov(est_target, reports_features, cosine_similarity, feature_wise=False, standardize=standardize_cov_matrix)
+        train_x.append(sim)
+        train_y.append(est_target_upper_dig)
 
-    train_x.append(sim)
-    train_y.append(est_target_upper_dig)
-    #mean_covs.append(cov.diagonal().mean())
+        #printing mean covariance of period
+        cor_upper = cor[np.triu_indices(cor.shape[0], k=1)]
+        print(cor_upper.mean())
 
-    #print(cor.diagonal().mean())
-    cor_upper = cor[np.triu_indices(cor.shape[0], k=1)]
-    print(cor_upper.mean())
+    # creating the training data
+    train_x = np.concatenate(train_x, axis=0)
+    train_y = np.concatenate(train_y, axis=0)
 
-# creating the training data
-train_x = np.concatenate(train_x, axis=0)
-train_y = np.concatenate(train_y, axis=0)
+    # standardizing the data
+    scaler = StandardScaler()
+    if not feature_wise:
+        train_x = train_x.reshape(-1, 1)
+    train_x = scaler.fit_transform(train_x)
 
-# standardizing the data
-scaler = StandardScaler()
-if not feature_wise:
-    train_x = train_x.reshape(-1, 1)
-train_x = scaler.fit_transform(train_x)
-
-# regression model for prediction
-lr = LinearRegression(fit_intercept=with_intercept)
-lr.fit(train_x, train_y)
+    # regression model for prediction
+    lr = LinearRegression(fit_intercept=with_intercept)
+    lr.fit(train_x, train_y)
 
 # mean variance in the sample, as model doesn't predict variance
 #sample_mean_var = np.mean(mean_covs)
 
 # the following is to test to trained model
 total_quarters = 8
-
 test_intervals = int(total_quarters / time_horizon_quarters)
 
+#initializing empty numpy arrays to save returns to
 r_equal = np.array([])
 r_constant = np.array([])
 r_sample = np.array([])
@@ -412,15 +466,20 @@ r_lw = np.array([])
 r_model = np.array([])
 r_combined = np.array([])
 
+#this is for saving the results
 frob_rows = []
 df_columns = ["equal", "constant", "sample", "lw", "model", "combined"]
 df_index = []
 var_rows = []
 
-
+#testing the model
 for i in range(test_intervals):
 
-    sample_start = datetime(year=2018, month=1, day=1) + QuarterBegin(startingMonth=1, n=i * time_horizon_quarters)
+    if mode == "eval":
+        y = 2016
+    if mode == "test":
+        y = 2018
+    sample_start = datetime(year=y, month=1, day=1) + QuarterBegin(startingMonth=1, n=i * time_horizon_quarters)
     sample_stop = sample_start + DateOffset(years=1) - DateOffset(days=1)
 
     out_of_sample_start = sample_stop + DateOffset(days=1)
@@ -456,26 +515,41 @@ for i in range(test_intervals):
     sample_mean_cor = cor_upper.mean()
     sample_mean_var = np.diagonal(cov_sample).mean()
 
-    if predict_corr:
-        cov_model = predict_correlation_matrix_model(lr, scaler, reports_features_out_of_sample, sample_mean_cor,
-                                                     feature_wise, standardize_cov_matrix, cov_sample)
-    else:
-        cov_model = predict_covariance_matrix_model(lr, scaler, reports_features_out_of_sample, sample_mean_var,
-                                                    sample_mean_cov, feature_wise, standardize_cov_matrix)
+    if model_train_sample == "whole":
+        if predict_corr:
+            cov_model = predict_correlation_matrix_model(lr, scaler, reports_features_out_of_sample, sample_mean_cor,
+                                                         feature_wise, standardize_cov_matrix, cov_sample)
+        else:
+            cov_model = predict_covariance_matrix_model(lr, scaler, reports_features_out_of_sample, sample_mean_var,
+                                                        sample_mean_cov, feature_wise, standardize_cov_matrix)
 
+    if model_train_sample == "window":
+        # feature engineer for the sample window
+        if model == "tfidf":
+            reports_features_sample = tfidf_features(reports_sample, vectorizer)
+        if model in ["svd", "lda"]:
+            reports_features_sample = topic_model_features(reports_sample, vectorizer, topic_model)
+
+        cov_model = predict_cov_window_model(cov_sample, reports_features_sample, reports_features_out_of_sample)
+
+    #covariance estimate on assumption that all covariance values are equal
     cov_equal = np.full(cov_sample.shape, sample_mean_cov)
     np.fill_diagonal(cov_equal, sample_mean_var)
 
+    #estimates from constant covariance model (
     cov_constant = constant_covariance_model(cov_sample, sample_mean_cor)
 
+    #estimates from ledoit-wolf estimator
     LW = LedoitWolf()
     cov_lw = LW.fit(returns_sample).covariance_
 
-    cov_combined = (cov_model + cov_lw) / 2
+    #weighted average of the estimation from the model and the sample covariance matrix
+    cov_combined = ensemble_weight * cov_model + (1 - ensemble_weight) * cov_lw
 
     # empirical variance for the out of sample time frame
     cov_true = compute_cov_matrix(returns_out_of_sample)
 
+    #the frobernius error norms for different estimates
     frob_results_line = [np.linalg.norm(cov_true - cov_equal, ord="fro"),
                          np.linalg.norm(cov_true - cov_constant, ord="fro"),
                          np.linalg.norm(cov_true - cov_sample, ord="fro"), np.linalg.norm(cov_true - cov_lw, ord="fro"),
@@ -531,16 +605,7 @@ for i in range(test_intervals):
     r_combined, r_combined_var = realized_portfolio_returns(returns_out_of_sample.values, w_combined, r_combined)
 
     var_line = [r_equal_var, r_constant_var, r_sample_var, r_lw_var, r_model_var, r_combined_var]
-
     var_rows.append(var_line)
-
-#csv file writers to save results
-#with open("results/frob_" + trial_name + ".csv", "w", newline="") as file:
-#    frob_writer = csv.writer(file, delimiter=';', quoting=csv.QUOTE_MINIMAL)
-#    frob_writer.writerows(frob_rows)
-#with open("results/std_" + trial_name + ".csv", "w", newline="") as file:
-#    var_writer = csv.writer(file, delimiter=';', quoting=csv.QUOTE_MINIMAL)
-#    var_writer.writerows(var_rows)
 
 df_frob = pd.DataFrame(frob_rows, columns=df_columns, index=df_index)
 df_frob.loc["all"] = df_frob.mean(axis=0)
@@ -558,23 +623,26 @@ df_var["impr_comb"] = (df_var["combined"]/df_var["equal"]) - 1
 
 print(df_var)
 
+print("improvement in variance of returns through ensemble at weight of " + str(ensemble_weight) + ":")
+print(df_var.loc["whole", "impr_comb"])
+
 port_r_equal = realize_returns(100, r_equal)
-port_r_combined = realize_returns(100, r_combined)
+port_r_model = realize_returns(100, r_combined)
 
 df_frob.to_csv("results/frob_" + trial_name + ".csv", sep=";")
 df_var.to_csv("results/std_" + trial_name + ".csv", sep=";")
 
 # plotting the returns
 x = range(len(port_r_equal))
-plt.plot(x, port_r_equal, label="market")
+plt.plot(x, port_r_equal, label="equal")
 # plt.plot(x, r_sample, label="sample")
 #plt.plot(x, r_lw, label="ledoit wolf")
 # plt.plot(x, r_model, label="lda model")
-plt.plot(x, port_r_combined, label="combined")
+plt.plot(x, port_r_model, label="model")
 
 plt.legend()
+plt.xlabel("trading days")
+plt.ylabel("portfolio value")
 
+#plt.savefig("realized.png")
 plt.show()
-
-print("coefficients of regression model")
-print(lr.coef_)
