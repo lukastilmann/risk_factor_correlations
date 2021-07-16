@@ -14,6 +14,7 @@ from pandas import Timedelta
 import matplotlib.pyplot as plt
 import csv
 
+#train functions train one of the various feature embeddings
 
 def train_tfidf_model(df, train_last, idf=True):
     corpus = df.loc[:train_last].values.flatten()
@@ -68,7 +69,7 @@ def get_reports_for_date(df, date):
 
     return df_date
 
-
+#projects text data into the space of a topic model
 def topic_model_features(reports, vectorizer, model):
     if isinstance(reports, pd.DataFrame):
         reports = reports.iloc[0]
@@ -79,7 +80,7 @@ def topic_model_features(reports, vectorizer, model):
 
     return vector_topics
 
-
+#projects text data into tfidf space
 def tfidf_features(reports, vectorizer):
     if isinstance(reports, pd.DataFrame):
         reports = reports.iloc[0]
@@ -95,6 +96,7 @@ def get_returns_for_period(df, start, stop):
     return df
 
 
+#computes covariance or correlation matrix and returns it as a pandas DataFrame with index and column labels
 def compute_cov_matrix(returns, corr=False):
     if corr:
         matrix = np.corrcoef(returns.values.transpose())
@@ -105,6 +107,7 @@ def compute_cov_matrix(returns, corr=False):
     return df
 
 
+#finds the intersection of the column values of a list of dataframes
 def find_column_intersection(list_dfs):
     list_columns = []
 
@@ -121,11 +124,13 @@ def find_column_intersection(list_dfs):
     return list_dfs_new
 
 
+#computes sample covariance matrix of a sample as default, correlation matrix if corr=True
 def predict_cov_sample(prev_sample, corr=False):
-
     return compute_cov_matrix(prev_sample, corr).values
 
 
+#computes covariance matrix where every covariance value and each variance value is the mean of those values in
+#previous sample
 def predict_mean(prev_sample):
     cov_mat = prev_sample.values
     without_diag = cov_mat[~np.eye(cov_mat.shape[0], dtype=bool)].reshape(cov_mat.shape[0], -1)
@@ -137,17 +142,7 @@ def predict_mean(prev_sample):
     return mean_cov
 
 
-def eval_predictions(true, pred):
-    return (np.square(true - pred)).mean(axis=None)
-
-
-def calculate_portfolio_var(w, sigma):
-    w = np.asmatrix(w)
-    sigma = np.asmatrix(sigma)
-
-    return (w.transpose() * sigma * w)
-
-
+#computes portfolio weights with minimum variance given a covariance matrix
 def optimal_portfolio_weights(sigma):
     size = sigma.shape[0]
     sigma = np.asmatrix(sigma)
@@ -158,6 +153,7 @@ def optimal_portfolio_weights(sigma):
     return w_star
 
 
+#computes calue of a portfolio over time and also returns standard deviation of returns
 def realized_portfolio_returns(returns, w_mat, returns_previous):
     w = np.asarray(w_mat).T
     portfolio_returns = returns * w
@@ -168,8 +164,8 @@ def realized_portfolio_returns(returns, w_mat, returns_previous):
     return_std = np.sqrt(return_var)
     sharpe = (return_mean / np.sqrt(return_var)) * np.sqrt(252)
 
-    #portfolio_returns = returns_previous
-    #for r in whole_portfolio_returns:
+    # portfolio_returns = returns_previous
+    # for r in whole_portfolio_returns:
     #    portfolio_returns.append(portfolio_returns[-1] * (1 + r))
 
     print("sharpe ratio: " + str(sharpe))
@@ -180,8 +176,9 @@ def realized_portfolio_returns(returns, w_mat, returns_previous):
 
     return portfolio_returns, return_std
 
-def realize_returns(start, portfolio_returns):
 
+# computes value of a portfolio given returns
+def realize_returns(start, portfolio_returns):
     port_returns = [start]
     for r in portfolio_returns:
         port_returns.append(port_returns[-1] * (1 + r))
@@ -189,6 +186,7 @@ def realize_returns(start, portfolio_returns):
     return port_returns
 
 
+# computes exponential distance
 def exp_dist(x_1, x_2):
     dist = np.absolute(x_1 - x_2)
     sim = np.exp(-1 * np.square(dist))
@@ -196,8 +194,10 @@ def exp_dist(x_1, x_2):
     return sim
 
 
+# extracts covariance values and computes similarity values and returns both as vectors
 def get_similarities_cov(mat, feature_data, sim_function, feature_wise, standardize):
     flat_upper = mat[np.triu_indices(mat.shape[0], k=1)]
+    n = feature_data.shape[0]
 
     if standardize:
         cov_mean = flat_upper.mean()
@@ -205,21 +205,15 @@ def get_similarities_cov(mat, feature_data, sim_function, feature_wise, standard
     else:
         cov_mat = flat_upper
 
-    n = feature_data.shape[0]
-
     if feature_wise:
-
         similarities = []
-
         for i in range(n):
             features_i = feature_data[i, :]
             for j in range(i + 1, n):
                 features_j = feature_data[j, :]
                 pairwise_sim = sim_function(features_i, features_j)
                 similarities.append(pairwise_sim)
-
         similarities = np.stack(similarities)
-
     else:
         similarities = sim_function(feature_data)
         similarities = similarities[np.triu_indices(similarities.shape[0], k=1)]
@@ -227,6 +221,7 @@ def get_similarities_cov(mat, feature_data, sim_function, feature_wise, standard
     return similarities, cov_mat
 
 
+# returns the covariance matrix estimated by a trained regression model
 def predict_covariance_matrix_model(model, scaler, feature_data, mean_var, mean_cov, feature_wise, add_mean):
     # for feature wise:
     if feature_wise:
@@ -245,15 +240,7 @@ def predict_covariance_matrix_model(model, scaler, feature_data, mean_var, mean_
     return matrix
 
 
-def corr_matrix_to_cov_matrix(cor_matrix, diag):
-
-    v = np.asmatrix(diag)
-    v_matrix = np.sqrt(np.matmul(v.T, v))
-    cov_est = np.multiply(cor_matrix, v_matrix)
-
-    return cov_est
-
-
+# returns the correlation matrix estimated by a trained regression model
 def predict_correlation_matrix_model(model, scaler, feature_data, mean_cor, feature_wise, add_mean, cov_mat):
     # for feature wise:
     if feature_wise:
@@ -274,8 +261,17 @@ def predict_correlation_matrix_model(model, scaler, feature_data, mean_cor, feat
     return matrix
 
 
-def constant_covariance_model(sample_cov, mean_corr):
+# converts a correlation matrix to a covariance matrix by using variance estimates (diag).
+def corr_matrix_to_cov_matrix(cor_matrix, diag):
+    v = np.asmatrix(diag)
+    v_matrix = np.sqrt(np.matmul(v.T, v))
+    cov_est = np.multiply(cor_matrix, v_matrix)
 
+    return cov_est
+
+
+# implements constant covariance model - assumes constant correlation
+def constant_covariance_model(sample_cov, mean_corr):
     diag = np.diag(sample_cov)
     cor_matrix = np.full(sample_cov.shape, mean_corr)
     np.fill_diagonal(cor_matrix, 1)
@@ -283,8 +279,9 @@ def constant_covariance_model(sample_cov, mean_corr):
 
     return cov_est
 
-def predict_cov_window_model(prev_cov, feature_data_prev, feature_data_next):
 
+# implements the model from the paper Covariance Regression Analysis by Zou et al.
+def predict_cov_window_model(prev_cov, feature_data_prev, feature_data_next):
     sim_measure = lambda x_1, x_2: cosine_similarity(x_1.reshape(1, -1), x_2.reshape(1, -1))
 
     matrix_prev = pairwise_distances(feature_data_prev, metric=sim_measure)
@@ -292,8 +289,8 @@ def predict_cov_window_model(prev_cov, feature_data_prev, feature_data_next):
     intercept_matrix = np.zeros(matrix_prev.shape)
     np.fill_diagonal(intercept_matrix, 1)
 
-    train_x = np.concatenate([intercept_matrix.reshape((1,-1)), matrix_prev.reshape(1,-1)], axis=1)
-    train_y = prev_cov.reshape(1,-1)
+    train_x = np.concatenate([intercept_matrix.reshape((1, -1)), matrix_prev.reshape(1, -1)], axis=1)
+    train_y = prev_cov.reshape(1, -1)
 
     lin_reg = LinearRegression(fit_intercept=False).fit(train_x, train_y)
 
@@ -302,7 +299,7 @@ def predict_cov_window_model(prev_cov, feature_data_prev, feature_data_next):
     intercept_matrix = np.zeros(matrix_next.shape)
     np.fill_diagonal(intercept_matrix, 1)
 
-    next_x = np.concatenate([intercept_matrix.reshape((1,-1)), matrix_prev.reshape(1,-1)], axis=1)
+    next_x = np.concatenate([intercept_matrix.reshape((1, -1)), matrix_prev.reshape(1, -1)], axis=1)
 
     pred_y = lin_reg.predict(next_x)
     matrix_pred = np.reshape(pred_y, matrix_next.shape)
@@ -310,34 +307,33 @@ def predict_cov_window_model(prev_cov, feature_data_prev, feature_data_next):
     return matrix_pred
 
 
-
 # parameters:
-#how many quarters are in one sub-period
+# how many quarters are in one sub-period
 time_horizon_quarters = 1
-#frequency of returns
+# frequency of returns
 frequency = "daily"
-#can be "eval" for evaluating hyperparameters on the 2017-2018 sample or test for testing on 2019-2020 sample
+# can be "eval" for evaluating hyperparameters on the 2017-2018 sample or test for testing on 2019-2020 sample
 mode = "eval"
-#if "window", the model is trained on the preceding sample only
-#if "whole", a model trained on the whole period before the test/eval sample is used
+# if "window", the model is trained on the preceding sample only
+# if "whole", a model trained on the whole period before the test/eval sample is used
 model_train_sample = "window"
-#the featuee embedding that is used. Options are "lda", "tfidf" and "lsa"
+# the featuee embedding that is used. Options are "lda", "tfidf" and "lsa"
 model = "lda"
-#if using tfidf-space as embedding, this specifies if inverse document frrequency-weighting is applied
+# if using tfidf-space as embedding, this specifies if inverse document frrequency-weighting is applied
 idf = True
-#if true, feature-wise similarity measure is used
+# if true, feature-wise similarity measure is used
 feature_wise = False
-#when using topic model (lsa or lda), this specifies the number of topics
+# when using topic model (lsa or lda), this specifies the number of topics
 n_dims = 5
-#specifies if the regression model is fit with intercept
+# specifies if the regression model is fit with intercept
 with_intercept = False
-#specifies if cov-matrix is standardized by subtracting the mean covariance
+# specifies if cov-matrix is standardized by subtracting the mean covariance
 standardize_cov_matrix = True
-#if true, the model predicts correlation, not covariance. Only works with model trained on whole sample, not window
+# if true, the model predicts correlation, not covariance. Only works with model trained on whole sample, not window
 predict_corr = False
-#the weight applied to the estimation generated from model when using the ensemble of model and lw-estimator
+# the weight applied to the estimation generated from model when using the ensemble of model and lw-estimator
 ensemble_weight = 0.1
-#name of the files in which results are saved
+# name of the files in which results are saved
 trial_name = "lda5dim_cov_standardize_horizon2Q_daily_window_ensemble0.1"
 
 # loading data
@@ -401,16 +397,16 @@ if model_train_sample == "whole":
         print(date + pd.DateOffset(days=1))
         print(returns_stop)
 
-        #loading reports and returns for period, finding the companies in which both datapoints exist
+        # loading reports and returns for period, finding the companies in which both datapoints exist
         reports = get_reports_for_date(df_reports, date)
         returns = get_returns_for_period(df_returns, date + pd.DateOffset(days=1), returns_stop)
         returns, reports = find_column_intersection([returns, reports])
 
-        #covariance and correlation matrix for period
+        # covariance and correlation matrix for period
         cov = predict_cov_sample(returns)
         cor = predict_cov_sample(returns, True)
 
-        #feature engineering
+        # feature engineering
         if model == "tfidf":
             reports_features = tfidf_features(reports, vectorizer)
         if model in ["svd", "lda"]:
@@ -421,8 +417,8 @@ if model_train_sample == "whole":
         else:
             est_target = cov
 
-        #computing similarity matrix and getting the upper diagonal of covariance- and similarity-matrix
-        #in a 1-dimensional vector
+        # computing similarity matrix and getting the upper diagonal of covariance- and similarity-matrix
+        # in a 1-dimensional vector
         if feature_wise:
             sim, est_target_upper_dig = get_similarities_cov(est_target, reports_features, exp_dist, feature_wise=True,
                                                              standardize=standardize_cov_matrix)
@@ -433,7 +429,7 @@ if model_train_sample == "whole":
         train_x.append(sim)
         train_y.append(est_target_upper_dig)
 
-        #printing mean covariance of period
+        # printing mean covariance of period
         cor_upper = cor[np.triu_indices(cor.shape[0], k=1)]
         print(cor_upper.mean())
 
@@ -452,13 +448,13 @@ if model_train_sample == "whole":
     lr.fit(train_x, train_y)
 
 # mean variance in the sample, as model doesn't predict variance
-#sample_mean_var = np.mean(mean_covs)
+# sample_mean_var = np.mean(mean_covs)
 
 # the following is to test to trained model
 total_quarters = 8
 test_intervals = int(total_quarters / time_horizon_quarters)
 
-#initializing empty numpy arrays to save returns to
+# initializing empty numpy arrays to save returns to
 r_equal = np.array([])
 r_constant = np.array([])
 r_sample = np.array([])
@@ -466,13 +462,13 @@ r_lw = np.array([])
 r_model = np.array([])
 r_combined = np.array([])
 
-#this is for saving the results
+# this is for saving the results
 frob_rows = []
 df_columns = ["equal", "constant", "sample", "lw", "model", "combined"]
 df_index = []
 var_rows = []
 
-#testing the model
+# testing the model
 for i in range(test_intervals):
 
     if mode == "eval":
@@ -532,24 +528,24 @@ for i in range(test_intervals):
 
         cov_model = predict_cov_window_model(cov_sample, reports_features_sample, reports_features_out_of_sample)
 
-    #covariance estimate on assumption that all covariance values are equal
+    # covariance estimate on assumption that all covariance values are equal
     cov_equal = np.full(cov_sample.shape, sample_mean_cov)
     np.fill_diagonal(cov_equal, sample_mean_var)
 
-    #estimates from constant covariance model (
+    # estimates from constant covariance model (
     cov_constant = constant_covariance_model(cov_sample, sample_mean_cor)
 
-    #estimates from ledoit-wolf estimator
+    # estimates from ledoit-wolf estimator
     LW = LedoitWolf()
     cov_lw = LW.fit(returns_sample).covariance_
 
-    #weighted average of the estimation from the model and the sample covariance matrix
+    # weighted average of the estimation from the model and the sample covariance matrix
     cov_combined = ensemble_weight * cov_model + (1 - ensemble_weight) * cov_lw
 
     # empirical variance for the out of sample time frame
     cov_true = compute_cov_matrix(returns_out_of_sample)
 
-    #the frobernius error norms for different estimates
+    # the frobernius error norms for different estimates
     frob_results_line = [np.linalg.norm(cov_true - cov_equal, ord="fro"),
                          np.linalg.norm(cov_true - cov_constant, ord="fro"),
                          np.linalg.norm(cov_true - cov_sample, ord="fro"), np.linalg.norm(cov_true - cov_lw, ord="fro"),
@@ -607,10 +603,12 @@ for i in range(test_intervals):
     var_line = [r_equal_var, r_constant_var, r_sample_var, r_lw_var, r_model_var, r_combined_var]
     var_rows.append(var_line)
 
+#code below creates the csv files in which results are saved
+
 df_frob = pd.DataFrame(frob_rows, columns=df_columns, index=df_index)
 df_frob.loc["all"] = df_frob.mean(axis=0)
-df_frob["impr_model"] = (df_frob["model"]/df_frob["equal"]) - 1
-df_frob["impr_comb"] = (df_frob["combined"]/df_frob["equal"]) - 1
+df_frob["impr_model"] = (df_frob["model"] / df_frob["equal"]) - 1
+df_frob["impr_comb"] = (df_frob["combined"] / df_frob["equal"]) - 1
 
 print(df_frob)
 
@@ -618,8 +616,8 @@ std_whole = [r_equal.std(), r_constant.std(), r_sample.std(), r_lw.std(), r_mode
 df_var = pd.DataFrame(var_rows, columns=df_columns, index=df_index)
 df_var.loc["mean"] = df_var.mean(axis=0)
 df_var.loc["whole"] = std_whole
-df_var["impr_model"] = (df_var["model"]/df_var["equal"]) - 1
-df_var["impr_comb"] = (df_var["combined"]/df_var["equal"]) - 1
+df_var["impr_model"] = (df_var["model"] / df_var["equal"]) - 1
+df_var["impr_comb"] = (df_var["combined"] / df_var["equal"]) - 1
 
 print(df_var)
 
@@ -636,7 +634,7 @@ df_var.to_csv("results/std_" + trial_name + ".csv", sep=";")
 x = range(len(port_r_equal))
 plt.plot(x, port_r_equal, label="equal")
 # plt.plot(x, r_sample, label="sample")
-#plt.plot(x, r_lw, label="ledoit wolf")
+# plt.plot(x, r_lw, label="ledoit wolf")
 # plt.plot(x, r_model, label="lda model")
 plt.plot(x, port_r_model, label="model")
 
@@ -644,5 +642,5 @@ plt.legend()
 plt.xlabel("trading days")
 plt.ylabel("portfolio value")
 
-#plt.savefig("realized.png")
+# plt.savefig("realized.png")
 plt.show()
