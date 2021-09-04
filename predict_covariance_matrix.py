@@ -3,7 +3,7 @@ from sklearn.decomposition import LatentDirichletAllocation, TruncatedSVD
 from sklearn.metrics.pairwise import cosine_similarity, pairwise_distances
 from sklearn.linear_model import LinearRegression, ElasticNetCV, RidgeCV
 from sklearn.covariance import LedoitWolf
-from sklearn.preprocessing import StandardScaler
+from sklearn.preprocessing import StandardScaler, OneHotEncoder
 import pandas as pd
 import os
 import pickle
@@ -69,6 +69,7 @@ def get_reports_for_date(df, date):
 
     return df_date
 
+
 #projects text data into the space of a topic model
 def topic_model_features(reports, vectorizer, model):
     if isinstance(reports, pd.DataFrame):
@@ -80,12 +81,18 @@ def topic_model_features(reports, vectorizer, model):
 
     return vector_topics
 
+
 #projects text data into tfidf space
 def tfidf_features(reports, vectorizer):
     if isinstance(reports, pd.DataFrame):
         reports = reports.iloc[0]
 
     return vectorizer.transform(reports)
+
+def industry_class_features(df_industries, index):
+    ind = df_industries.loc[index]
+
+    return ind
 
 
 def get_returns_for_period(df, start, stop):
@@ -314,9 +321,11 @@ time_horizon_quarters = 1
 frequency = "daily"
 # can be "eval" for evaluating hyperparameters on the 2017-2018 sample or test for testing on 2019-2020 sample
 mode = "eval"
+# if true, the industry classification will be used instead of risk reports
+use_ind_class = True
 # if "window", the model is trained on the preceding sample only
 # if "whole", a model trained on the whole period before the test/eval sample is used
-model_train_sample = "window"
+model_train_sample = "whole"
 # the featuee embedding that is used. Options are "lda", "tfidf" and "lsa"
 model = "lda"
 # if using tfidf-space as embedding, this specifies if inverse document frrequency-weighting is applied
@@ -330,11 +339,11 @@ with_intercept = False
 # specifies if cov-matrix is standardized by subtracting the mean covariance
 standardize_cov_matrix = True
 # if true, the model predicts correlation, not covariance. Only works with model trained on whole sample, not window
-predict_corr = False
+predict_corr = True
 # the weight applied to the estimation generated from model when using the ensemble of model and lw-estimator
-ensemble_weight = 0.1
+ensemble_weight = 0.3
 # name of the files in which results are saved
-trial_name = "lda5dim_cov_standardize_horizon2Q_daily_window_ensemble0.1"
+trial_name = "lda5dim_cor_standardize_horizon1Q_daily_whole_ensemble0.3_eval_lwvars_indclass"
 
 # loading data
 df_reports = pd.read_csv("data/reports_with_duplicates_final.csv", dtype="string", index_col="date")
@@ -343,6 +352,15 @@ if frequency == "daily":
     df_returns = pd.read_csv("data/stock_returns.csv", index_col="Date")
 if frequency == "weekly":
     df_returns = pd.read_csv("data/stock_returns_weekly.csv", index_col="Date")
+
+#loading industry classifications and one hot encoding them
+df_industry_classification = pd.read_csv("data/GISC.csv", sep=";",
+                                         usecols=["company","ticker","GISC","TRBC BusinessSector"])
+df_industry_classification["indx"] = df_industry_classification["ticker"] + "_" + df_industry_classification["company"].astype("str")
+df_industry_classification.index = df_industry_classification["indx"]
+df_industry_classification = df_industry_classification.drop(columns=["company", "ticker", "indx", "TRBC BusinessSector"])
+oh_encoder = OneHotEncoder()
+df_industry_classification = pd.get_dummies(df_industry_classification, columns=["GISC"])
 
 df_returns.index = pd.to_datetime(df_returns.index)
 
@@ -408,9 +426,12 @@ if model_train_sample == "whole":
 
         # feature engineering
         if model == "tfidf":
-            reports_features = tfidf_features(reports, vectorizer)
+            feature_data = tfidf_features(reports, vectorizer)
         if model in ["svd", "lda"]:
-            reports_features = topic_model_features(reports, vectorizer, topic_model)
+            feature_data = topic_model_features(reports, vectorizer, topic_model)
+
+        if use_ind_class:
+            feature_data = industry_class_features(df_industry_classification, returns.columns)
 
         if predict_corr:
             est_target = cor
@@ -420,10 +441,10 @@ if model_train_sample == "whole":
         # computing similarity matrix and getting the upper diagonal of covariance- and similarity-matrix
         # in a 1-dimensional vector
         if feature_wise:
-            sim, est_target_upper_dig = get_similarities_cov(est_target, reports_features, exp_dist, feature_wise=True,
+            sim, est_target_upper_dig = get_similarities_cov(est_target, feature_data, exp_dist, feature_wise=True,
                                                              standardize=standardize_cov_matrix)
         else:
-            sim, est_target_upper_dig = get_similarities_cov(est_target, reports_features, cosine_similarity,
+            sim, est_target_upper_dig = get_similarities_cov(est_target, feature_data, cosine_similarity,
                                                              feature_wise=False, standardize=standardize_cov_matrix)
 
         train_x.append(sim)
@@ -513,8 +534,10 @@ for i in range(test_intervals):
 
     if model_train_sample == "whole":
         if predict_corr:
+            LW = LedoitWolf()
+            cov_lw = LW.fit(returns_sample).covariance_
             cov_model = predict_correlation_matrix_model(lr, scaler, reports_features_out_of_sample, sample_mean_cor,
-                                                         feature_wise, standardize_cov_matrix, cov_sample)
+                                                         feature_wise, standardize_cov_matrix, cov_lw)
         else:
             cov_model = predict_covariance_matrix_model(lr, scaler, reports_features_out_of_sample, sample_mean_var,
                                                         sample_mean_cov, feature_wise, standardize_cov_matrix)
