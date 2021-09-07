@@ -161,7 +161,7 @@ def optimal_portfolio_weights(sigma):
 
 
 #computes calue of a portfolio over time and also returns standard deviation of returns
-def realized_portfolio_returns(returns, w_mat, returns_previous):
+def realized_portfolio_returns(returns, w_mat, returns_previous, start_date):
     w = np.asarray(w_mat).T
     portfolio_returns = returns * w
     whole_portfolio_returns = np.sum(portfolio_returns, axis=1)
@@ -169,11 +169,18 @@ def realized_portfolio_returns(returns, w_mat, returns_previous):
     return_mean = whole_portfolio_returns.mean()
     return_var = whole_portfolio_returns.var()
     return_std = np.sqrt(return_var)
-    sharpe = (return_mean / np.sqrt(return_var)) * np.sqrt(252)
+    #sharpe = (return_mean / np.sqrt(return_var)) * np.sqrt(252)
 
     # portfolio_returns = returns_previous
     # for r in whole_portfolio_returns:
     #    portfolio_returns.append(portfolio_returns[-1] * (1 + r))
+
+    #for sharpe ratio:
+    portfolio_return = np.product(whole_portfolio_returns + 1) - 1
+    #read earliest interest rate for time period and convert from percentage
+    risk_free_return = df_risk_free_return.loc[start_date:].values[0,0] * 0.01
+    trading_days = len(whole_portfolio_returns)
+    sharpe = (portfolio_return - risk_free_return) / (return_std * np.sqrt(trading_days))
 
     print("sharpe ratio: " + str(sharpe))
     print("r std: " + str(return_std))
@@ -352,6 +359,7 @@ if frequency == "daily":
     df_returns = pd.read_csv("data/stock_returns.csv", index_col="Date")
 if frequency == "weekly":
     df_returns = pd.read_csv("data/stock_returns_weekly.csv", index_col="Date")
+df_returns.index = pd.to_datetime(df_returns.index)
 
 #loading industry classifications and one hot encoding them
 df_industry_classification = pd.read_csv("data/GISC.csv", sep=";",
@@ -362,7 +370,8 @@ df_industry_classification = df_industry_classification.drop(columns=["company",
 oh_encoder = OneHotEncoder()
 df_industry_classification = pd.get_dummies(df_industry_classification, columns=["GISC"])
 
-df_returns.index = pd.to_datetime(df_returns.index)
+#loading data for risk free rates of return (three month treasury bills)
+df_risk_free_return = pd.read_csv("data/T_Bills_3m.csv", sep=";", decimal=",", index_col="Name", parse_dates=["Name"], dayfirst=True)
 
 # defining train test split
 train_first = datetime(year=2005, month=12, day=31)
@@ -611,17 +620,17 @@ for i in range(test_intervals):
     print("-----compute returns----")
 
     print("equal cov portfolio")
-    r_equal, r_equal_var = realized_portfolio_returns(returns_out_of_sample.values, w_equal, r_equal)
+    r_equal, r_equal_var = realized_portfolio_returns(returns_out_of_sample.values, w_equal, r_equal, out_of_sample_start)
     print("constant cov portfolio")
-    r_constant, r_constant_var = realized_portfolio_returns(returns_out_of_sample.values, w_constant, r_constant)
+    r_constant, r_constant_var = realized_portfolio_returns(returns_out_of_sample.values, w_constant, r_constant, out_of_sample_start)
     print("sample cov portfolio")
-    r_sample, r_sample_var = realized_portfolio_returns(returns_out_of_sample.values, w_sample, r_sample)
+    r_sample, r_sample_var = realized_portfolio_returns(returns_out_of_sample.values, w_sample, r_sample, out_of_sample_start)
     print("ledoit wolf cov portfolio")
-    r_lw, r_lw_var = realized_portfolio_returns(returns_out_of_sample.values, w_lw, r_lw)
+    r_lw, r_lw_var = realized_portfolio_returns(returns_out_of_sample.values, w_lw, r_lw, out_of_sample_start)
     print("model cov portfolio")
-    r_model, r_model_var = realized_portfolio_returns(returns_out_of_sample.values, w_model, r_model)
+    r_model, r_model_var = realized_portfolio_returns(returns_out_of_sample.values, w_model, r_model, out_of_sample_start)
     print("combined cov portfolio")
-    r_combined, r_combined_var = realized_portfolio_returns(returns_out_of_sample.values, w_combined, r_combined)
+    r_combined, r_combined_var = realized_portfolio_returns(returns_out_of_sample.values, w_combined, r_combined, out_of_sample_start)
 
     var_line = [r_equal_var, r_constant_var, r_sample_var, r_lw_var, r_model_var, r_combined_var]
     var_rows.append(var_line)
