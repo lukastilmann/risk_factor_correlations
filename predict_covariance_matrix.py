@@ -268,6 +268,10 @@ def predict_correlation_matrix_model(model, scaler, feature_data, mean_cor, feat
     matrix = pairwise_distances(feature_data, metric=sim_measure)
     if add_mean:
         matrix = matrix + mean_cor
+
+    #transformation
+    matrix = np.arctanh(matrix)
+
     np.fill_diagonal(matrix, 1)
     diag = np.diag(cov_mat)
     matrix = corr_matrix_to_cov_matrix(matrix, diag)
@@ -329,7 +333,7 @@ frequency = "daily"
 # can be "eval" for evaluating hyperparameters on the 2017-2018 sample or test for testing on 2019-2020 sample
 mode = "eval"
 # if true, the industry classification will be used instead of risk reports
-use_ind_class = True
+use_ind_class = False
 # if "window", the model is trained on the preceding sample only
 # if "whole", a model trained on the whole period before the test/eval sample is used
 model_train_sample = "whole"
@@ -350,7 +354,7 @@ predict_corr = True
 # the weight applied to the estimation generated from model when using the ensemble of model and lw-estimator
 ensemble_weight = 0.3
 # name of the files in which results are saved
-trial_name = "lda5dim_cor_standardize_horizon1Q_daily_whole_ensemble0.3_eval_lwvars_indclass"
+trial_name = "lda5dim_cor_standardize_horizon1Q_daily_whole_ensemble0.3_eval_lwvars_transform"
 
 # loading data
 df_reports = pd.read_csv("data/reports_with_duplicates_final.csv", dtype="string", index_col="date")
@@ -466,6 +470,8 @@ if model_train_sample == "whole":
     # creating the training data
     train_x = np.concatenate(train_x, axis=0)
     train_y = np.concatenate(train_y, axis=0)
+    #transformation
+    train_y = np.tanh(train_y)
 
     # standardizing the data
     scaler = StandardScaler()
