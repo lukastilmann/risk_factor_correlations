@@ -326,8 +326,8 @@ def predict_cov_window_model(prev_cov, feature_data_prev, feature_data_next):
 time_horizon_quarters = 1
 # frequency of returns
 frequency = "daily"
-# can be "eval" for evaluating hyperparameters on the 2017-2018 sample or test for testing on 2019-2020 sample
-mode = "eval"
+# can be "eval" for evaluating hyperparameters on the 2017-2018 sample or "test" for testing on 2019-2020 sample
+mode = "test"
 # if true, the industry classification will be used instead of risk reports
 use_ind_class = True
 # if "window", the model is trained on the preceding sample only
@@ -350,7 +350,7 @@ predict_corr = True
 # the weight applied to the estimation generated from model when using the ensemble of model and lw-estimator
 ensemble_weight = 0.3
 # name of the files in which results are saved
-trial_name = "lda5dim_cor_standardize_horizon1Q_daily_whole_ensemble0.3_eval_lwvars_indclass"
+trial_name = "lda5dim_cor_standardize_horizon1Q_daily_whole_ensemble0.3_eval_lwvars_no_transform"
 
 # loading data
 df_reports = pd.read_csv("data/reports_with_duplicates_final.csv", dtype="string", index_col="date")
@@ -415,6 +415,10 @@ train_x = []
 train_y = []
 mean_sims = []
 
+#lists for collection similarities on industry classifications and risk report topics
+sim_reports = []
+sim_ind = []
+
 if model_train_sample == "whole":
     for date in train_range:
 
@@ -435,12 +439,11 @@ if model_train_sample == "whole":
 
         # feature engineering
         if model == "tfidf":
-            feature_data = tfidf_features(reports, vectorizer)
+            feature_data_rep = tfidf_features(reports, vectorizer)
         if model in ["svd", "lda"]:
-            feature_data = topic_model_features(reports, vectorizer, topic_model)
+            feature_data_rep = topic_model_features(reports, vectorizer, topic_model)
 
-        if use_ind_class:
-            feature_data = industry_class_features(df_industry_classification, returns.columns)
+        feature_data_ind = industry_class_features(df_industry_classification, reports.columns)
 
         if predict_corr:
             est_target = cor
@@ -450,11 +453,19 @@ if model_train_sample == "whole":
         # computing similarity matrix and getting the upper diagonal of covariance- and similarity-matrix
         # in a 1-dimensional vector
         if feature_wise:
-            sim, est_target_upper_dig = get_similarities_cov(est_target, feature_data, exp_dist, feature_wise=True,
+            sim, est_target_upper_dig = get_similarities_cov(est_target, feature_data_rep, exp_dist, feature_wise=True,
                                                              standardize=standardize_cov_matrix)
         else:
-            sim, est_target_upper_dig = get_similarities_cov(est_target, feature_data, cosine_similarity,
+            sim, est_target_upper_dig = get_similarities_cov(est_target, feature_data_rep, cosine_similarity,
                                                              feature_wise=False, standardize=standardize_cov_matrix)
+
+        #calculating similarity of industry class
+        sim_industry,_ = get_similarities_cov(est_target, feature_data_ind, cosine_similarity, feature_wise=False,
+                                                         standardize=standardize_cov_matrix)
+
+        #collecting data
+        sim_ind.append(sim_industry)
+        sim_reports.append(sim)
 
         train_x.append(sim)
         train_y.append(est_target_upper_dig)
@@ -466,6 +477,10 @@ if model_train_sample == "whole":
     # creating the training data
     train_x = np.concatenate(train_x, axis=0)
     train_y = np.concatenate(train_y, axis=0)
+
+    #concatenating collected data
+    sim_reports = np.concatenate(sim_reports, axis=0)
+    sim_ind = np.concatenate(sim_ind, axis=0)
 
     # standardizing the data
     scaler = StandardScaler()
@@ -676,3 +691,7 @@ plt.ylabel("portfolio value")
 
 # plt.savefig("realized.png")
 plt.show()
+
+#printing correlation between industry and reports similarity
+print("correlation between similarity of reports and industry classifications:")
+print(np.corrcoef(sim_reports, sim_ind))
