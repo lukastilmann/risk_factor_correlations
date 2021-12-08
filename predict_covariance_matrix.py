@@ -14,7 +14,8 @@ from pandas import Timedelta
 import matplotlib.pyplot as plt
 import csv
 
-#train functions train one of the various feature embeddings
+
+# train functions train one of the various feature embeddings
 
 def train_tfidf_model(df, train_last, idf=True):
     corpus = df.loc[:train_last].values.flatten()
@@ -70,7 +71,7 @@ def get_reports_for_date(df, date):
     return df_date
 
 
-#projects text data into the space of a topic model
+# projects text data into the space of a topic model
 def topic_model_features(reports, vectorizer, model):
     if isinstance(reports, pd.DataFrame):
         reports = reports.iloc[0]
@@ -82,12 +83,13 @@ def topic_model_features(reports, vectorizer, model):
     return vector_topics
 
 
-#projects text data into tfidf space
+# projects text data into tfidf space
 def tfidf_features(reports, vectorizer):
     if isinstance(reports, pd.DataFrame):
         reports = reports.iloc[0]
 
     return vectorizer.transform(reports)
+
 
 def industry_class_features(df_industries, index):
     ind = df_industries.loc[index]
@@ -103,7 +105,7 @@ def get_returns_for_period(df, start, stop):
     return df
 
 
-#computes covariance or correlation matrix and returns it as a pandas DataFrame with index and column labels
+# computes covariance or correlation matrix and returns it as a pandas DataFrame with index and column labels
 def compute_cov_matrix(returns, corr=False):
     if corr:
         matrix = np.corrcoef(returns.values.transpose())
@@ -114,7 +116,7 @@ def compute_cov_matrix(returns, corr=False):
     return df
 
 
-#finds the intersection of the column values of a list of dataframes
+# finds the intersection of the column values of a list of dataframes
 def find_column_intersection(list_dfs):
     list_columns = []
 
@@ -131,13 +133,13 @@ def find_column_intersection(list_dfs):
     return list_dfs_new
 
 
-#computes sample covariance matrix of a sample as default, correlation matrix if corr=True
+# computes sample covariance matrix of a sample as default, correlation matrix if corr=True
 def predict_cov_sample(prev_sample, corr=False):
     return compute_cov_matrix(prev_sample, corr).values
 
 
-#computes covariance matrix where every covariance value and each variance value is the mean of those values in
-#previous sample
+# computes covariance matrix where every covariance value and each variance value is the mean of those values in
+# previous sample
 def predict_mean(prev_sample):
     cov_mat = prev_sample.values
     without_diag = cov_mat[~np.eye(cov_mat.shape[0], dtype=bool)].reshape(cov_mat.shape[0], -1)
@@ -149,7 +151,7 @@ def predict_mean(prev_sample):
     return mean_cov
 
 
-#computes portfolio weights with minimum variance given a covariance matrix
+# computes portfolio weights with minimum variance given a covariance matrix
 def optimal_portfolio_weights(sigma):
     size = sigma.shape[0]
     sigma = np.asmatrix(sigma)
@@ -160,7 +162,7 @@ def optimal_portfolio_weights(sigma):
     return w_star
 
 
-#computes calue of a portfolio over time and also returns standard deviation of returns
+# computes calue of a portfolio over time and also returns standard deviation of returns
 def realized_portfolio_returns(returns, w_mat, returns_previous, start_date):
     w = np.asarray(w_mat).T
     portfolio_returns = returns * w
@@ -169,16 +171,16 @@ def realized_portfolio_returns(returns, w_mat, returns_previous, start_date):
     return_mean = whole_portfolio_returns.mean()
     return_var = whole_portfolio_returns.var()
     return_std = np.sqrt(return_var)
-    #sharpe = (return_mean / np.sqrt(return_var)) * np.sqrt(252)
+    # sharpe = (return_mean / np.sqrt(return_var)) * np.sqrt(252)
 
     # portfolio_returns = returns_previous
     # for r in whole_portfolio_returns:
     #    portfolio_returns.append(portfolio_returns[-1] * (1 + r))
 
-    #for sharpe ratio:
+    # for sharpe ratio:
     portfolio_return = np.product(whole_portfolio_returns + 1) - 1
-    #read earliest interest rate for time period and convert from percentage
-    risk_free_return = df_risk_free_return.loc[start_date:].values[0,0] * 0.01
+    # read earliest interest rate for time period and convert from percentage
+    risk_free_return = df_risk_free_return.loc[start_date:].values[0, 0] * 0.01
     trading_days = len(whole_portfolio_returns)
     sharpe = (portfolio_return - risk_free_return) / (return_std * np.sqrt(trading_days))
 
@@ -268,6 +270,10 @@ def predict_correlation_matrix_model(model, scaler, feature_data, mean_cor, feat
     matrix = pairwise_distances(feature_data, metric=sim_measure)
     if add_mean:
         matrix = matrix + mean_cor
+
+    # transformation
+    matrix = np.tanh(matrix)
+
     np.fill_diagonal(matrix, 1)
     diag = np.diag(cov_mat)
     matrix = corr_matrix_to_cov_matrix(matrix, diag)
@@ -329,7 +335,7 @@ frequency = "daily"
 # can be "eval" for evaluating hyperparameters on the 2017-2018 sample or test for testing on 2019-2020 sample
 mode = "eval"
 # if true, the industry classification will be used instead of risk reports
-use_ind_class = True
+use_ind_class = False
 # if "window", the model is trained on the preceding sample only
 # if "whole", a model trained on the whole period before the test/eval sample is used
 model_train_sample = "whole"
@@ -350,7 +356,7 @@ predict_corr = True
 # the weight applied to the estimation generated from model when using the ensemble of model and lw-estimator
 ensemble_weight = 0.3
 # name of the files in which results are saved
-trial_name = "lda5dim_cor_standardize_horizon1Q_daily_whole_ensemble0.3_eval_lwvars_indclass"
+trial_name = "lda5dim_cor_standardize_horizon1Q_daily_whole_ensemble0.3_eval_lwvars_transform"
 
 # loading data
 df_reports = pd.read_csv("data/reports_with_duplicates_final.csv", dtype="string", index_col="date")
@@ -361,17 +367,20 @@ if frequency == "weekly":
     df_returns = pd.read_csv("data/stock_returns_weekly.csv", index_col="Date")
 df_returns.index = pd.to_datetime(df_returns.index)
 
-#loading industry classifications and one hot encoding them
+# loading industry classifications and one hot encoding them
 df_industry_classification = pd.read_csv("data/GISC.csv", sep=";",
-                                         usecols=["company","ticker","GISC","TRBC BusinessSector"])
-df_industry_classification["indx"] = df_industry_classification["ticker"] + "_" + df_industry_classification["company"].astype("str")
+                                         usecols=["company", "ticker", "GISC", "TRBC BusinessSector"])
+df_industry_classification["indx"] = df_industry_classification["ticker"] + "_" + df_industry_classification[
+    "company"].astype("str")
 df_industry_classification.index = df_industry_classification["indx"]
-df_industry_classification = df_industry_classification.drop(columns=["company", "ticker", "indx", "TRBC BusinessSector"])
+df_industry_classification = df_industry_classification.drop(
+    columns=["company", "ticker", "indx", "TRBC BusinessSector"])
 oh_encoder = OneHotEncoder()
 df_industry_classification = pd.get_dummies(df_industry_classification, columns=["GISC"])
 
-#loading data for risk free rates of return (three month treasury bills)
-df_risk_free_return = pd.read_csv("data/T_Bills_3m.csv", sep=";", decimal=",", index_col="Name", parse_dates=["Name"], dayfirst=True)
+# loading data for risk free rates of return (three month treasury bills)
+df_risk_free_return = pd.read_csv("data/T_Bills_3m.csv", sep=";", decimal=",", index_col="Name", parse_dates=["Name"],
+                                  dayfirst=True)
 
 # defining train test split
 train_first = datetime(year=2005, month=12, day=31)
@@ -466,6 +475,10 @@ if model_train_sample == "whole":
     # creating the training data
     train_x = np.concatenate(train_x, axis=0)
     train_y = np.concatenate(train_y, axis=0)
+
+    # transformation of correlations, if those are estimation target
+    if predict_corr:
+        train_y = np.arctanh(train_y)
 
     # standardizing the data
     scaler = StandardScaler()
@@ -620,22 +633,27 @@ for i in range(test_intervals):
     print("-----compute returns----")
 
     print("equal cov portfolio")
-    r_equal, r_equal_var = realized_portfolio_returns(returns_out_of_sample.values, w_equal, r_equal, out_of_sample_start)
+    r_equal, r_equal_var = realized_portfolio_returns(returns_out_of_sample.values, w_equal, r_equal,
+                                                      out_of_sample_start)
     print("constant cov portfolio")
-    r_constant, r_constant_var = realized_portfolio_returns(returns_out_of_sample.values, w_constant, r_constant, out_of_sample_start)
+    r_constant, r_constant_var = realized_portfolio_returns(returns_out_of_sample.values, w_constant, r_constant,
+                                                            out_of_sample_start)
     print("sample cov portfolio")
-    r_sample, r_sample_var = realized_portfolio_returns(returns_out_of_sample.values, w_sample, r_sample, out_of_sample_start)
+    r_sample, r_sample_var = realized_portfolio_returns(returns_out_of_sample.values, w_sample, r_sample,
+                                                        out_of_sample_start)
     print("ledoit wolf cov portfolio")
     r_lw, r_lw_var = realized_portfolio_returns(returns_out_of_sample.values, w_lw, r_lw, out_of_sample_start)
     print("model cov portfolio")
-    r_model, r_model_var = realized_portfolio_returns(returns_out_of_sample.values, w_model, r_model, out_of_sample_start)
+    r_model, r_model_var = realized_portfolio_returns(returns_out_of_sample.values, w_model, r_model,
+                                                      out_of_sample_start)
     print("combined cov portfolio")
-    r_combined, r_combined_var = realized_portfolio_returns(returns_out_of_sample.values, w_combined, r_combined, out_of_sample_start)
+    r_combined, r_combined_var = realized_portfolio_returns(returns_out_of_sample.values, w_combined, r_combined,
+                                                            out_of_sample_start)
 
     var_line = [r_equal_var, r_constant_var, r_sample_var, r_lw_var, r_model_var, r_combined_var]
     var_rows.append(var_line)
 
-#code below creates the csv files in which results are saved
+# code below creates the csv files in which results are saved
 
 df_frob = pd.DataFrame(frob_rows, columns=df_columns, index=df_index)
 df_frob.loc["all"] = df_frob.mean(axis=0)
