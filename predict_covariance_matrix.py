@@ -270,7 +270,7 @@ def predict_correlation_matrix_model(model, scaler, feature_data, mean_cor, feat
         matrix = matrix + mean_cor
 
     #transformation
-    matrix = np.arctanh(matrix)
+    matrix = np.tanh(matrix)
 
     np.fill_diagonal(matrix, 1)
     diag = np.diag(cov_mat)
@@ -471,7 +471,7 @@ if model_train_sample == "whole":
     train_x = np.concatenate(train_x, axis=0)
     train_y = np.concatenate(train_y, axis=0)
     #transformation
-    train_y = np.tanh(train_y)
+    train_y = np.arctanh(train_y)
 
     # standardizing the data
     scaler = StandardScaler()
