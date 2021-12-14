@@ -350,7 +350,7 @@ predict_corr = True
 # the weight applied to the estimation generated from model when using the ensemble of model and lw-estimator
 ensemble_weight = 0.3
 # name of the files in which results are saved
-trial_name = "lda5dim_cor_standardize_horizon1Q_daily_whole_ensemble0.3_eval_lwvars_indclass"
+trial_name = "lda5dim_cor_standardize_horizon1Q_daily_whole_ensemble0.3_eval_lwvars_ind_class"
 
 # loading data
 df_reports = pd.read_csv("data/reports_with_duplicates_final.csv", dtype="string", index_col="date")
@@ -526,10 +526,13 @@ for i in range(test_intervals):
         [returns_sample, returns_out_of_sample, reports_sample, reports_out_of_sample])
 
     # feature engineer for the time frame to predict
-    if model == "tfidf":
-        reports_features_out_of_sample = tfidf_features(reports_out_of_sample, vectorizer)
-    if model in ["svd", "lda"]:
-        reports_features_out_of_sample = topic_model_features(reports_out_of_sample, vectorizer, topic_model)
+    if use_ind_class:
+        features_out_of_sample = industry_class_features(df_industry_classification, reports_out_of_sample.columns)
+    else:
+        if model == "tfidf":
+            features_out_of_sample = tfidf_features(reports_out_of_sample, vectorizer)
+        if model in ["svd", "lda"]:
+            features_out_of_sample = topic_model_features(reports_out_of_sample, vectorizer, topic_model)
 
     # different covariance matrix predictions
     cov_sample = predict_cov_sample(returns_sample)
@@ -545,10 +548,10 @@ for i in range(test_intervals):
         if predict_corr:
             LW = LedoitWolf()
             cov_lw = LW.fit(returns_sample).covariance_
-            cov_model = predict_correlation_matrix_model(lr, scaler, reports_features_out_of_sample, sample_mean_cor,
+            cov_model = predict_correlation_matrix_model(lr, scaler, features_out_of_sample, sample_mean_cor,
                                                          feature_wise, standardize_cov_matrix, cov_lw)
         else:
-            cov_model = predict_covariance_matrix_model(lr, scaler, reports_features_out_of_sample, sample_mean_var,
+            cov_model = predict_covariance_matrix_model(lr, scaler, features_out_of_sample, sample_mean_var,
                                                         sample_mean_cov, feature_wise, standardize_cov_matrix)
 
     if model_train_sample == "window":
@@ -558,7 +561,7 @@ for i in range(test_intervals):
         if model in ["svd", "lda"]:
             reports_features_sample = topic_model_features(reports_sample, vectorizer, topic_model)
 
-        cov_model = predict_cov_window_model(cov_sample, reports_features_sample, reports_features_out_of_sample)
+        cov_model = predict_cov_window_model(cov_sample, reports_features_sample, features_out_of_sample)
 
     # covariance estimate on assumption that all covariance values are equal
     cov_equal = np.full(cov_sample.shape, sample_mean_cov)
