@@ -327,6 +327,33 @@ def predict_cov_window_model(prev_cov, feature_data_prev, feature_data_next):
     return matrix_pred
 
 
+#predicting correlation matrix based on industry classification and risk report data
+def predict_correlation_matrix_both(model, scaler, feature_data_reports, feature_data_ind, mean_cor, add_mean, cov_mat):
+
+    # calculating the two similarity matrices
+    sim_matrix_reports = cosine_similarity(feature_data_reports)
+    sim_matrix_industry = cosine_similarity(feature_data_ind)
+
+    # predicting covariance based on both data types
+    model_input = np.concatenate([np.reshape(sim_matrix_reports, (-1,1)), np.reshape(sim_matrix_industry, (-1,1))], axis=1)
+    model_input = scaler.transform(model_input)
+    sim_predictions = model.predict(model_input)
+    if add_mean:
+        sim_predictions = sim_predictions + mean_cor
+
+    # reshape into matrix form
+    matrix = np.reshape(sim_predictions, sim_matrix_reports.shape)
+
+    # transformation
+    matrix = np.tanh(matrix)
+
+    # place 1 on diagonal and turn into covariance matrix
+    np.fill_diagonal(matrix, 1)
+    diag = np.diag(cov_mat)
+    matrix = corr_matrix_to_cov_matrix(matrix, diag)
+
+    return matrix
+
 # parameters:
 # how many quarters are in one sub-period
 time_horizon_quarters = 1
@@ -334,8 +361,8 @@ time_horizon_quarters = 1
 frequency = "daily"
 # can be "eval" for evaluating hyperparameters on the 2017-2018 sample or test for testing on 2019-2020 sample
 mode = "eval"
-# if true, the industry classification will be used instead of risk reports
-use_ind_class = False
+# can be "reports", "industry" or "both"
+which_data = "both"
 # if "window", the model is trained on the preceding sample only
 # if "whole", a model trained on the whole period before the test/eval sample is used
 model_train_sample = "whole"
@@ -443,13 +470,14 @@ if model_train_sample == "whole":
         cor = predict_cov_sample(returns, True)
 
         # feature engineering
-        if model == "tfidf":
-            feature_data = tfidf_features(reports, vectorizer)
-        if model in ["svd", "lda"]:
-            feature_data = topic_model_features(reports, vectorizer, topic_model)
+        if which_data == "reports" or "both":
+            if model == "tfidf":
+                feature_data_reports = tfidf_features(reports, vectorizer)
+            if model in ["svd", "lda"]:
+                feature_data_reports = topic_model_features(reports, vectorizer, topic_model)
 
-        if use_ind_class:
-            feature_data = industry_class_features(df_industry_classification, returns.columns)
+        if which_data == "industry" or "both":
+            feature_data_industry = industry_class_features(df_industry_classification, reports.columns)
 
         if predict_corr:
             est_target = cor
@@ -458,14 +486,30 @@ if model_train_sample == "whole":
 
         # computing similarity matrix and getting the upper diagonal of covariance- and similarity-matrix
         # in a 1-dimensional vector
-        if feature_wise:
-            sim, est_target_upper_dig = get_similarities_cov(est_target, feature_data, exp_dist, feature_wise=True,
+
+        # for risk reports
+        if which_data == "reports" or "both":
+            if feature_wise:
+                sim_reports, est_target_upper_dig = get_similarities_cov(est_target, feature_data_reports, exp_dist, feature_wise=True,
                                                              standardize=standardize_cov_matrix)
-        else:
-            sim, est_target_upper_dig = get_similarities_cov(est_target, feature_data, cosine_similarity,
+            else:
+                sim_reports, est_target_upper_dig = get_similarities_cov(est_target, feature_data_reports, cosine_similarity,
                                                              feature_wise=False, standardize=standardize_cov_matrix)
 
-        train_x.append(sim)
+        # for industry classifications
+        if which_data == "industry" or "both":
+            sim_industry, est_target_upper_dig = get_similarities_cov(est_target, feature_data_industry, cosine_similarity, feature_wise=False,
+                                                   standardize=standardize_cov_matrix)
+
+        #adding to training data:
+        if which_data == "reports":
+            train_x.append(sim_reports)
+        if which_data == "industry":
+            train_x.append(sim_industry)
+        if which_data == "both":
+            row = np.stack((sim_reports, sim_industry), axis=1)
+            train_x.append(row)
+
         train_y.append(est_target_upper_dig)
 
         # printing mean covariance of period
@@ -483,7 +527,10 @@ if model_train_sample == "whole":
     # standardizing the data
     scaler = StandardScaler()
     if not feature_wise:
-        train_x = train_x.reshape(-1, 1)
+        if which_data == "both":
+            train_x = train_x.reshape(-1,2)
+        else:
+            train_x = train_x.reshape(-1, 1)
     train_x = scaler.fit_transform(train_x)
 
     # regression model for prediction
@@ -539,13 +586,20 @@ for i in range(test_intervals):
         [returns_sample, returns_out_of_sample, reports_sample, reports_out_of_sample])
 
     # feature engineer for the time frame to predict
-    if use_ind_class:
-        features_out_of_sample = industry_class_features(df_industry_classification, reports_out_of_sample.columns)
-    else:
+    if which_data == "reports" or "both":
         if model == "tfidf":
-            features_out_of_sample = tfidf_features(reports_out_of_sample, vectorizer)
+            features_out_of_sample_reports = tfidf_features(reports_out_of_sample, vectorizer)
         if model in ["svd", "lda"]:
-            features_out_of_sample = topic_model_features(reports_out_of_sample, vectorizer, topic_model)
+            features_out_of_sample_reports = topic_model_features(reports_out_of_sample, vectorizer, topic_model)
+    if which_data == "industry" or "both":
+        features_out_of_sample_industry = industry_class_features(df_industry_classification, reports_out_of_sample.columns)
+        print(reports_out_of_sample.columns)
+        print(features_out_of_sample_industry.index)
+
+    if which_data == "reports":
+        features_out_of_sample = features_out_of_sample_reports
+    if which_data == "industry":
+        features_out_of_sample = features_out_of_sample_industry
 
     # different covariance matrix predictions
     cov_sample = predict_cov_sample(returns_sample)
@@ -558,13 +612,20 @@ for i in range(test_intervals):
     sample_mean_var = np.diagonal(cov_sample).mean()
 
     if model_train_sample == "whole":
-        if predict_corr:
+        if which_data == "both":
             LW = LedoitWolf()
             cov_lw = LW.fit(returns_sample).covariance_
-            cov_model = predict_correlation_matrix_model(lr, scaler, features_out_of_sample, sample_mean_cor,
-                                                         feature_wise, standardize_cov_matrix, cov_lw)
+            cov_model = predict_correlation_matrix_both(lr, scaler, features_out_of_sample_reports,
+                                                        features_out_of_sample_industry, sample_mean_cor,
+                                                        standardize_cov_matrix, cov_lw)
         else:
-            cov_model = predict_covariance_matrix_model(lr, scaler, features_out_of_sample, sample_mean_var,
+            if predict_corr:
+                LW = LedoitWolf()
+                cov_lw = LW.fit(returns_sample).covariance_
+                cov_model = predict_correlation_matrix_model(lr, scaler, features_out_of_sample, sample_mean_cor,
+                                                         feature_wise, standardize_cov_matrix, cov_lw)
+            else:
+                cov_model = predict_covariance_matrix_model(lr, scaler, features_out_of_sample, sample_mean_var,
                                                         sample_mean_cov, feature_wise, standardize_cov_matrix)
 
     if model_train_sample == "window":
