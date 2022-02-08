@@ -537,6 +537,9 @@ if model_train_sample == "whole":
     lr = LinearRegression(fit_intercept=with_intercept)
     lr.fit(train_x, train_y)
 
+    print("model coefficients: ")
+    print(lr.coef_)
+
 # mean variance in the sample, as model doesn't predict variance
 # sample_mean_var = np.mean(mean_covs)
 
@@ -593,8 +596,6 @@ for i in range(test_intervals):
             features_out_of_sample_reports = topic_model_features(reports_out_of_sample, vectorizer, topic_model)
     if which_data == "industry" or "both":
         features_out_of_sample_industry = industry_class_features(df_industry_classification, reports_out_of_sample.columns)
-        print(reports_out_of_sample.columns)
-        print(features_out_of_sample_industry.index)
 
     if which_data == "reports":
         features_out_of_sample = features_out_of_sample_reports
