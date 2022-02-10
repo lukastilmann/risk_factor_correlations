@@ -152,45 +152,47 @@ def predict_mean(prev_sample):
 
 
 # computes portfolio weights with minimum variance given a covariance matrix
-def optimal_portfolio_weights(sigma):
+def optimal_portfolio_weights(sigma, objective="minimum variance", mu=None, r_f=None):
     size = sigma.shape[0]
     sigma = np.asmatrix(sigma)
     one = np.ones((size, 1))
     one = np.asmatrix(one)
-    w_star = (np.linalg.inv(sigma) * one) / (one.T * np.linalg.inv(sigma) * one)
+    if objective == "sharpe":
+        expected_excess_returns = mu - r_f
+        expected_excess_returns = np.asmatrix(expected_excess_returns).T
+        w_star = (np.linalg.inv(sigma) * expected_excess_returns) / (one.T * np.linalg.inv(sigma) * expected_excess_returns)
+    elif objective == "minimum variance":
+        w_star = (np.linalg.inv(sigma) * one) / (one.T * np.linalg.inv(sigma) * one)
 
     return w_star
 
 
 # computes calue of a portfolio over time and also returns standard deviation of returns
 def realized_portfolio_returns(returns, w_mat, returns_previous, start_date):
+    #calculate returns of the whole portfolio based on portfolio weights
     w = np.asarray(w_mat).T
     portfolio_returns = returns * w
     whole_portfolio_returns = np.sum(portfolio_returns, axis=1)
 
-    return_mean = whole_portfolio_returns.mean()
+    #calculate standard deviation and variance of portfolio returns
     return_var = whole_portfolio_returns.var()
     return_std = np.sqrt(return_var)
-    # sharpe = (return_mean / np.sqrt(return_var)) * np.sqrt(252)
-
-    # portfolio_returns = returns_previous
-    # for r in whole_portfolio_returns:
-    #    portfolio_returns.append(portfolio_returns[-1] * (1 + r))
 
     # for sharpe ratio:
     portfolio_return = np.product(whole_portfolio_returns + 1) - 1
     # read earliest interest rate for time period and convert from percentage
     risk_free_return = df_risk_free_return.loc[start_date:].values[0, 0] * 0.01
     trading_days = len(whole_portfolio_returns)
-    sharpe = (portfolio_return - risk_free_return) / (return_std * np.sqrt(trading_days))
+    #annualizing the sharpe ratio
+    sharpe_ratio = (portfolio_return - risk_free_return) / (return_std * np.sqrt(trading_days))
 
-    print("sharpe ratio: " + str(sharpe))
+    print("sharpe ratio: " + str(sharpe_ratio))
     print("r std: " + str(return_std))
     print("-----")
 
     portfolio_returns = np.concatenate((returns_previous, whole_portfolio_returns))
 
-    return portfolio_returns, return_std
+    return portfolio_returns, return_std, sharpe_ratio
 
 
 # computes value of a portfolio given returns
@@ -361,12 +363,14 @@ time_horizon_quarters = 1
 frequency = "daily"
 # can be "eval" for evaluating hyperparameters on the 2017-2018 sample or test for testing on 2019-2020 sample
 mode = "eval"
+#objective, can be "minimum variance" or "sharpe"
+objective = "sharpe"
 # can be "reports", "industry" or "both"
 which_data = "both"
 # if "window", the model is trained on the preceding sample only
 # if "whole", a model trained on the whole period before the test/eval sample is used
 model_train_sample = "whole"
-# the featuee embedding that is used. Options are "lda", "tfidf" and "lsa"
+# the feature embedding that is used. Options are "lda", "tfidf" and "lsa"
 model = "lda"
 # if using tfidf-space as embedding, this specifies if inverse document frrequency-weighting is applied
 idf = True
@@ -556,10 +560,11 @@ r_model = np.array([])
 r_combined = np.array([])
 
 # this is for saving the results
-frob_rows = []
 df_columns = ["equal", "constant", "sample", "lw", "model", "combined"]
 df_index = []
+frob_rows = []
 var_rows = []
+sharpe_rows = []
 
 # testing the model
 for i in range(test_intervals):
@@ -655,7 +660,7 @@ for i in range(test_intervals):
     # empirical variance for the out of sample time frame
     cov_true = compute_cov_matrix(returns_out_of_sample)
 
-    # the frobernius error norms for different estimates
+    # the frobenius error norms for different estimates
     frob_results_line = [np.linalg.norm(cov_true - cov_equal, ord="fro"),
                          np.linalg.norm(cov_true - cov_constant, ord="fro"),
                          np.linalg.norm(cov_true - cov_sample, ord="fro"), np.linalg.norm(cov_true - cov_lw, ord="fro"),
@@ -687,39 +692,56 @@ for i in range(test_intervals):
     print(frob_results_line[5])
 
     # constructing portfolios based on predictions
-    w_equal = optimal_portfolio_weights(cov_equal)
-    w_constant = optimal_portfolio_weights(cov_constant)
-    w_sample = optimal_portfolio_weights(cov_sample)
-    w_lw = optimal_portfolio_weights(cov_lw)
-    w_model = optimal_portfolio_weights(cov_model)
-    w_combined = optimal_portfolio_weights(cov_combined)
+    # either the minimum variance portfolio or the portfolio on the efficient frontier
+    # which maximizes the sharpe ratio
+    if objective == "sharpe":
+        r_f = ((1 + df_risk_free_return.loc[out_of_sample_start:].values[0, 0] * 0.01) ** (4/365))  - 1
+        #equally weighted here
+        df_returns_with_market = returns_sample.copy()
+        df_returns_with_market["market"] = df_returns_with_market.mean(axis=1)
+        cov_with_market = predict_cov_sample(df_returns_with_market)
+        cov_m = cov_with_market[-1]
+        beta = cov_m / np.diagonal(cov_with_market)
+        mu = (r_f + beta * (0.0005 - r_f))[:-1]
+    else:
+        r_f = None
+        mu = None
+
+    w_equal = optimal_portfolio_weights(cov_equal, objective=objective, r_f=r_f, mu=mu)
+    w_constant = optimal_portfolio_weights(cov_constant, objective=objective, r_f=r_f, mu=mu)
+    w_sample = optimal_portfolio_weights(cov_sample, objective=objective, r_f=r_f, mu=mu)
+    w_lw = optimal_portfolio_weights(cov_lw, objective=objective, r_f=r_f, mu=mu)
+    w_model = optimal_portfolio_weights(cov_model, objective=objective, r_f=r_f, mu=mu)
+    w_combined = optimal_portfolio_weights(cov_combined, objective=objective, r_f=r_f, mu=mu)
 
     # calculating realized returns based on these portfolios
     print("-----compute returns----")
 
     print("equal cov portfolio")
-    r_equal, r_equal_var = realized_portfolio_returns(returns_out_of_sample.values, w_equal, r_equal,
+    r_equal, r_equal_var, sharpe_equal = realized_portfolio_returns(returns_out_of_sample.values, w_equal, r_equal,
                                                       out_of_sample_start)
     print("constant cov portfolio")
-    r_constant, r_constant_var = realized_portfolio_returns(returns_out_of_sample.values, w_constant, r_constant,
+    r_constant, r_constant_var, sharpe_constant = realized_portfolio_returns(returns_out_of_sample.values, w_constant, r_constant,
                                                             out_of_sample_start)
     print("sample cov portfolio")
-    r_sample, r_sample_var = realized_portfolio_returns(returns_out_of_sample.values, w_sample, r_sample,
+    r_sample, r_sample_var, sharpe_sample = realized_portfolio_returns(returns_out_of_sample.values, w_sample, r_sample,
                                                         out_of_sample_start)
     print("ledoit wolf cov portfolio")
-    r_lw, r_lw_var = realized_portfolio_returns(returns_out_of_sample.values, w_lw, r_lw, out_of_sample_start)
+    r_lw, r_lw_var, sharpe_lw = realized_portfolio_returns(returns_out_of_sample.values, w_lw, r_lw, out_of_sample_start)
     print("model cov portfolio")
-    r_model, r_model_var = realized_portfolio_returns(returns_out_of_sample.values, w_model, r_model,
+    r_model, r_model_var, sharpe_model = realized_portfolio_returns(returns_out_of_sample.values, w_model, r_model,
                                                       out_of_sample_start)
     print("combined cov portfolio")
-    r_combined, r_combined_var = realized_portfolio_returns(returns_out_of_sample.values, w_combined, r_combined,
+    r_combined, r_combined_var, sharpe_combined = realized_portfolio_returns(returns_out_of_sample.values, w_combined, r_combined,
                                                             out_of_sample_start)
 
     var_line = [r_equal_var, r_constant_var, r_sample_var, r_lw_var, r_model_var, r_combined_var]
     var_rows.append(var_line)
 
-# code below creates the csv files in which results are saved
+    sharpe_line = [sharpe_equal, sharpe_constant, sharpe_sample, sharpe_lw, sharpe_model, sharpe_combined]
+    sharpe_rows.append(sharpe_line)
 
+# code below creates the csv files in which results are saved
 df_frob = pd.DataFrame(frob_rows, columns=df_columns, index=df_index)
 df_frob.loc["all"] = df_frob.mean(axis=0)
 df_frob["impr_model"] = (df_frob["model"] / df_frob["equal"]) - 1
@@ -736,22 +758,30 @@ df_var["impr_comb"] = (df_var["combined"] / df_var["equal"]) - 1
 
 print(df_var)
 
+df_sharpe = pd.DataFrame(sharpe_rows, columns=df_columns, index=df_index)
+df_sharpe.loc["mean"] = df_sharpe.mean(axis=0)
+df_sharpe["impr_model"] = (df_sharpe["model"] / df_sharpe["equal"]) - 1
+df_sharpe["impr_comb"] = (df_sharpe["combined"] / df_sharpe["equal"]) - 1
+
+print(df_sharpe)
+
 print("improvement in variance of returns through ensemble at weight of " + str(ensemble_weight) + ":")
-print(df_var.loc["whole", "impr_comb"])
+print(df_sharpe.loc["mean", "impr_comb"])
 
 port_r_equal = realize_returns(100, r_equal)
 port_r_model = realize_returns(100, r_combined)
+port_r_lw = realize_returns(100, r_lw)
+port_r_sample = realize_returns(100, r_sample)
 
 df_frob.to_csv("results/frob_" + trial_name + ".csv", sep=";")
 df_var.to_csv("results/std_" + trial_name + ".csv", sep=";")
+df_sharpe.to_csv("results/sharpe_" + trial_name + ".csv", sep=";")
 
 # plotting the returns
 x = range(len(port_r_equal))
-plt.plot(x, port_r_equal, label="equal")
-# plt.plot(x, r_sample, label="sample")
-# plt.plot(x, r_lw, label="ledoit wolf")
-# plt.plot(x, r_model, label="lda model")
+plt.plot(x, port_r_lw, label="ledoit wolf")
 plt.plot(x, port_r_model, label="model")
+plt.plot(x, port_r_sample, label="sample")
 
 plt.legend()
 plt.xlabel("trading days")
