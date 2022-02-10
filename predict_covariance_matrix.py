@@ -385,9 +385,18 @@ standardize_cov_matrix = True
 # if true, the model predicts correlation, not covariance. Only works with model trained on whole sample, not window
 predict_corr = True
 # the weight applied to the estimation generated from model when using the ensemble of model and lw-estimator
-ensemble_weight = 0.3
-# name of the files in which results are saved
-trial_name = "lda5dim_cor_standardize_horizon1Q_daily_whole_ensemble0.3_eval_lwvars_transform"
+ensemble_weight = 0.2
+
+
+# creating a name for the configuration under which to save results
+dim = str(n_dims) if model in ["lda", "svd"] else ""
+hor = str(time_horizon_quarters) + "Q"
+model_save = "tfidf" if model == "tfidf" and idf else model
+target = "cor" if predict_corr else "cov"
+trial_name = "{model}{dim}_{target}_{horizon}_{freq}_{sample}_{ensemble_weight}_{mode}_{objective}"
+trial_name = trial_name.format(model=model_save, dim=dim, target=target, horizon=hor, freq=frequency,
+                               sample=model_train_sample, ensemble_weight=str(ensemble_weight),
+                               mode=mode, objective=objective)
 
 # loading data
 df_reports = pd.read_csv("data/reports_with_duplicates_final.csv", dtype="string", index_col="date")
