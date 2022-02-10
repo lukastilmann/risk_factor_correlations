@@ -364,7 +364,7 @@ frequency = "daily"
 # can be "eval" for evaluating hyperparameters on the 2017-2018 sample or test for testing on 2019-2020 sample
 mode = "eval"
 #objective, can be "minimum variance" or "sharpe"
-objective = "sharpe"
+objective = "minimum variance"
 # can be "reports", "industry" or "both"
 which_data = "both"
 # if "window", the model is trained on the preceding sample only
@@ -774,8 +774,12 @@ df_sharpe["impr_comb"] = (df_sharpe["combined"] / df_sharpe["equal"]) - 1
 
 print(df_sharpe)
 
-print("improvement in variance of returns through ensemble at weight of " + str(ensemble_weight) + ":")
-print(df_sharpe.loc["mean", "impr_comb"])
+obj = "variance of returns" if objective == "minimum variance" else "sharpe ratio"
+print("improvement in {} through ensemble at weight of ".format(obj) + str(ensemble_weight) + ":")
+if objective == "minimum variance":
+    print(df_var.loc["mean", "impr_comb"])
+if objective == "sharpe":
+    print(df_sharpe.loc["mean", "impr_comb"])
 
 port_r_equal = realize_returns(100, r_equal)
 port_r_model = realize_returns(100, r_combined)
