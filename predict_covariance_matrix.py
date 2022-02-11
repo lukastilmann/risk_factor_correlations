@@ -361,8 +361,8 @@ def predict_correlation_matrix_both(model, scaler, feature_data_reports, feature
 time_horizon_quarters = 1
 # frequency of returns
 frequency = "daily"
-# can be "eval" for evaluating hyperparameters on the 2017-2018 sample or test for testing on 2019-2020 sample
-mode = "eval"
+# can be "val" for evaluating hyperparameters on the 2017-2018 sample or test for testing on 2019-2020 sample
+mode = "val"
 #objective, can be "minimum variance" or "sharpe"
 objective = "minimum variance"
 # can be "reports", "industry" or "both"
@@ -424,7 +424,7 @@ df_risk_free_return = pd.read_csv("data/T_Bills_3m.csv", sep=";", decimal=",", i
 
 # defining train test split
 train_first = datetime(year=2005, month=12, day=31)
-if mode == "eval":
+if mode == "val":
     train_last = datetime(year=2016, month=9, day=30)
 if mode == "test":
     train_last = datetime(year=2018, month=9, day=30)
@@ -578,7 +578,7 @@ sharpe_rows = []
 # testing the model
 for i in range(test_intervals):
 
-    if mode == "eval":
+    if mode == "val":
         y = 2016
     if mode == "test":
         y = 2018
