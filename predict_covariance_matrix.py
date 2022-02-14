@@ -364,7 +364,7 @@ frequency = "daily"
 # can be "val" for evaluating hyperparameters on the 2017-2018 sample or test for testing on 2019-2020 sample
 mode = "val"
 #objective, can be "minimum variance" or "sharpe"
-objective = "minimum variance"
+objective = "sharpe"
 # can be "reports", "industry" or "both"
 which_data = "both"
 # if "window", the model is trained on the preceding sample only
@@ -377,15 +377,15 @@ idf = True
 # if true, feature-wise similarity measure is used
 feature_wise = False
 # when using topic model (lsa or lda), this specifies the number of topics
-n_dims = 5
+n_dims = 3
 # specifies if the regression model is fit with intercept
 with_intercept = False
 # specifies if cov-matrix is standardized by subtracting the mean covariance
 standardize_cov_matrix = True
 # if true, the model predicts correlation, not covariance. Only works with model trained on whole sample, not window
-predict_corr = True
+predict_corr = False
 # the weight applied to the estimation generated from model when using the ensemble of model and lw-estimator
-ensemble_weight = 0.2
+ensemble_weight = 1
 
 
 # creating a name for the configuration under which to save results
@@ -393,9 +393,12 @@ dim = str(n_dims) if model in ["lda", "svd"] else ""
 hor = str(time_horizon_quarters) + "Q"
 model_save = "tfidf" if model == "tfidf" and idf else model
 target = "cor" if predict_corr else "cov"
-trial_name = "{model}{dim}_{target}_{horizon}_{freq}_{sample}_{ensemble_weight}_{mode}_{objective}"
-trial_name = trial_name.format(model=model_save, dim=dim, target=target, horizon=hor, freq=frequency,
-                               sample=model_train_sample, ensemble_weight=str(ensemble_weight),
+if which_data == "industry":
+    model_save = ""
+    dim = ""
+trial_name = "{model}{dim}_{which_data}_{target}_{horizon}_{freq}_{sample}_{ensemble_weight}_{mode}_{objective}"
+trial_name = trial_name.format(model=model_save, dim=dim, which_data=which_data, target=target, horizon=hor,
+                               freq=frequency, sample=model_train_sample, ensemble_weight=str(ensemble_weight),
                                mode=mode, objective=objective)
 
 # loading data
