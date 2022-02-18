@@ -330,7 +330,7 @@ def predict_cov_window_model(prev_cov, feature_data_prev, feature_data_next):
 
 
 #predicting correlation matrix based on industry classification and risk report data
-def predict_correlation_matrix_both(model, scaler, feature_data_reports, feature_data_ind, mean_cor, add_mean, cov_mat):
+def predict_cov_matrix_both(model, scaler, feature_data_reports, feature_data_ind, mean_sample, add_mean, cov_mat, pred_cor=True):
 
     # calculating the two similarity matrices
     sim_matrix_reports = cosine_similarity(feature_data_reports)
@@ -341,18 +341,23 @@ def predict_correlation_matrix_both(model, scaler, feature_data_reports, feature
     model_input = scaler.transform(model_input)
     sim_predictions = model.predict(model_input)
     if add_mean:
-        sim_predictions = sim_predictions + mean_cor
+        sim_predictions = sim_predictions + mean_sample
 
     # reshape into matrix form
     matrix = np.reshape(sim_predictions, sim_matrix_reports.shape)
 
-    # transformation
-    matrix = np.tanh(matrix)
+    if pred_cor:
+        # transformation
+        matrix = np.tanh(matrix)
 
-    # place 1 on diagonal and turn into covariance matrix
-    np.fill_diagonal(matrix, 1)
-    diag = np.diag(cov_mat)
-    matrix = corr_matrix_to_cov_matrix(matrix, diag)
+        # place 1 on diagonal and turn into covariance matrix
+        np.fill_diagonal(matrix, 1)
+        diag = np.diag(cov_mat)
+        matrix = corr_matrix_to_cov_matrix(matrix, diag)
+
+    else:
+        #place mean variance of last sample on diagonal
+        np.fill_diagonal(matrix, np.diagonal(cov_mat).mean())
 
     return matrix
 
@@ -631,11 +636,17 @@ for i in range(test_intervals):
 
     if model_train_sample == "whole":
         if which_data == "both":
-            LW = LedoitWolf()
-            cov_lw = LW.fit(returns_sample).covariance_
-            cov_model = predict_correlation_matrix_both(lr, scaler, features_out_of_sample_reports,
+            if predict_corr:
+                LW = LedoitWolf()
+                cov_lw = LW.fit(returns_sample).covariance_
+                cov_model = predict_cov_matrix_both(lr, scaler, features_out_of_sample_reports,
                                                         features_out_of_sample_industry, sample_mean_cor,
                                                         standardize_cov_matrix, cov_lw)
+            else:
+                cov_model = predict_cov_matrix_both(lr, scaler, features_out_of_sample_reports,
+                                                            features_out_of_sample_industry, sample_mean_cov,
+                                                            standardize_cov_matrix, cov_sample, False)
+
         else:
             if predict_corr:
                 LW = LedoitWolf()
