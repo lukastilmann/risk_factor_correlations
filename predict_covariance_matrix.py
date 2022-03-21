@@ -367,9 +367,9 @@ time_horizon_quarters = 1
 # frequency of returns
 frequency = "daily"
 # can be "val" for evaluating hyperparameters on the 2017-2018 sample or test for testing on 2019-2020 sample
-mode = "val"
+mode = "test"
 #objective, can be "minimum variance" or "sharpe"
-objective = "sharpe"
+objective = "minimum variance"
 # can be "reports", "industry" or "both"
 which_data = "both"
 # if "window", the model is trained on the preceding sample only
@@ -382,15 +382,16 @@ idf = True
 # if true, feature-wise similarity measure is used
 feature_wise = False
 # when using topic model (lsa or lda), this specifies the number of topics
-n_dims = 3
+n_dims = 5
 # specifies if the regression model is fit with intercept
 with_intercept = False
 # specifies if cov-matrix is standardized by subtracting the mean covariance
 standardize_cov_matrix = True
 # if true, the model predicts correlation, not covariance. Only works with model trained on whole sample, not window
 predict_corr = False
-# the weight applied to the estimation generated from model when using the ensemble of model and lw-estimator
-ensemble_weight = 1
+# the weights applied for the ensemble model
+ensemble_weight_rep = 0.1
+ensemble_weight_ind = 0.25
 
 
 # creating a name for the configuration under which to save results
@@ -403,7 +404,8 @@ if which_data == "industry":
     dim = ""
 trial_name = "{model}{dim}_{which_data}_{target}_{horizon}_{freq}_{sample}_{ensemble_weight}_{mode}_{objective}"
 trial_name = trial_name.format(model=model_save, dim=dim, which_data=which_data, target=target, horizon=hor,
-                               freq=frequency, sample=model_train_sample, ensemble_weight=str(ensemble_weight),
+                               freq=frequency, sample=model_train_sample,
+                               ensemble_weight=str(ensemble_weight_rep) + "+" + str(ensemble_weight_ind),
                                mode=mode, objective=objective)
 
 # loading data
@@ -468,7 +470,8 @@ if model in ["svd", "lda"]:
 df_reports_train = df_reports.loc[train_first:train_last]
 train_range = df_reports_train.index
 
-train_x = []
+train_x_rep = []
+train_x_ind = []
 train_y = []
 mean_sims = []
 
@@ -522,14 +525,9 @@ if model_train_sample == "whole":
             sim_industry, est_target_upper_dig = get_similarities_cov(est_target, feature_data_industry, cosine_similarity, feature_wise=False,
                                                    standardize=standardize_cov_matrix)
 
-        #adding to training data:
-        if which_data == "reports":
-            train_x.append(sim_reports)
-        if which_data == "industry":
-            train_x.append(sim_industry)
-        if which_data == "both":
-            row = np.stack((sim_reports, sim_industry), axis=1)
-            train_x.append(row)
+        #adding to training data for each data type
+        train_x_rep.append(sim_reports)
+        train_x_ind.append(sim_industry)
 
         train_y.append(est_target_upper_dig)
 
@@ -538,7 +536,8 @@ if model_train_sample == "whole":
         print(cor_upper.mean())
 
     # creating the training data
-    train_x = np.concatenate(train_x, axis=0)
+    train_x_rep = np.concatenate(train_x_rep, axis=0)
+    train_x_ind = np.concatenate(train_x_ind, axis=0)
     train_y = np.concatenate(train_y, axis=0)
 
     # transformation of correlations, if those are estimation target
@@ -546,20 +545,22 @@ if model_train_sample == "whole":
         train_y = np.arctanh(train_y)
 
     # standardizing the data
-    scaler = StandardScaler()
-    if not feature_wise:
-        if which_data == "both":
-            train_x = train_x.reshape(-1,2)
-        else:
-            train_x = train_x.reshape(-1, 1)
-    train_x = scaler.fit_transform(train_x)
+    scaler_rep = StandardScaler()
+    scaler_ind = StandardScaler()
+    train_x_rep = train_x_rep.reshape(-1, 1)
+    train_x_ind = train_x_ind.reshape(-1, 1)
+    train_x_rep = scaler_rep.fit_transform(train_x_rep)
+    train_x_ind = scaler_ind.fit_transform(train_x_ind)
 
     # regression model for prediction
-    lr = LinearRegression(fit_intercept=with_intercept)
-    lr.fit(train_x, train_y)
+    lr_rep = LinearRegression(fit_intercept=with_intercept)
+    lr_ind = LinearRegression(fit_intercept=with_intercept)
+    lr_rep.fit(train_x_rep, train_y)
+    lr_ind.fit(train_x_ind, train_y)
 
     print("model coefficients: ")
-    print(lr.coef_)
+    print(lr_rep.coef_)
+    print(lr_ind.coef_)
 
 # mean variance in the sample, as model doesn't predict variance
 # sample_mean_var = np.mean(mean_covs)
@@ -634,28 +635,15 @@ for i in range(test_intervals):
     sample_mean_cor = cor_upper.mean()
     sample_mean_var = np.diagonal(cov_sample).mean()
 
+    #computing coverance matrices using the model for both data types each
     if model_train_sample == "whole":
-        if which_data == "both":
-            if predict_corr:
-                LW = LedoitWolf()
-                cov_lw = LW.fit(returns_sample).covariance_
-                cov_model = predict_cov_matrix_both(lr, scaler, features_out_of_sample_reports,
-                                                        features_out_of_sample_industry, sample_mean_cor,
-                                                        standardize_cov_matrix, cov_lw)
-            else:
-                cov_model = predict_cov_matrix_both(lr, scaler, features_out_of_sample_reports,
-                                                            features_out_of_sample_industry, sample_mean_cov,
-                                                            standardize_cov_matrix, cov_sample, False)
-
-        else:
-            if predict_corr:
-                LW = LedoitWolf()
-                cov_lw = LW.fit(returns_sample).covariance_
-                cov_model = predict_correlation_matrix_model(lr, scaler, features_out_of_sample, sample_mean_cor,
-                                                         feature_wise, standardize_cov_matrix, cov_lw)
-            else:
-                cov_model = predict_covariance_matrix_model(lr, scaler, features_out_of_sample, sample_mean_var,
+        cov_model_rep = predict_covariance_matrix_model(lr_rep, scaler_rep, features_out_of_sample_reports, sample_mean_var,
                                                         sample_mean_cov, feature_wise, standardize_cov_matrix)
+
+        cov_model_ind = predict_covariance_matrix_model(lr_ind, scaler_ind, features_out_of_sample_industry, sample_mean_var,
+                                                        sample_mean_cov, feature_wise, standardize_cov_matrix)
+
+    cov_model = (cov_model_rep + cov_model_ind) / 2
 
     if model_train_sample == "window":
         # feature engineer for the sample window
@@ -678,7 +666,8 @@ for i in range(test_intervals):
     cov_lw = LW.fit(returns_sample).covariance_
 
     # weighted average of the estimation from the model and the sample covariance matrix
-    cov_combined = ensemble_weight * cov_model + (1 - ensemble_weight) * cov_lw
+    cov_combined = ensemble_weight_rep * cov_model_rep + ensemble_weight_ind * cov_model_ind + \
+                   (1 - (ensemble_weight_rep + ensemble_weight_ind)) * cov_lw
 
     # empirical variance for the out of sample time frame
     cov_true = compute_cov_matrix(returns_out_of_sample)
@@ -692,6 +681,13 @@ for i in range(test_intervals):
 
     df_index.append(sample_stop)
     frob_rows.append(frob_results_line)
+
+    #computing errors
+    err_model_rep = cov_true - cov_model_rep
+    err_model_ind = cov_true - cov_model_ind
+
+    print("correlation of errors: ")
+    print(np.corrcoef(err_model_ind.values.flatten(), err_model_rep.values.flatten()))
 
     # evaluation of the predictions
     print("--------eval-------- ")
@@ -725,7 +721,8 @@ for i in range(test_intervals):
         cov_with_market = predict_cov_sample(df_returns_with_market)
         cov_m = cov_with_market[-1]
         beta = cov_m / np.diagonal(cov_with_market)
-        mu = (r_f + beta * (0.0005 - r_f))[:-1]
+        market_return_expected = (1 + 0.05) *(1/265) - 1
+        mu = (r_f + beta * (market_return_expected - r_f))[:-1]
     else:
         r_f = None
         mu = None
@@ -789,7 +786,7 @@ df_sharpe["impr_comb"] = (df_sharpe["combined"] / df_sharpe["equal"]) - 1
 print(df_sharpe)
 
 obj = "variance of returns" if objective == "minimum variance" else "sharpe ratio"
-print("improvement in {} through ensemble at weight of ".format(obj) + str(ensemble_weight) + ":")
+print("improvement in {} through ensemble at weight of ".format(obj) + str(ensemble_weight_rep) + " and " + str(ensemble_weight_ind) + ":")
 if objective == "minimum variance":
     print(df_var.loc["mean", "impr_comb"])
 if objective == "sharpe":
